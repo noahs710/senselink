@@ -1,0 +1,45 @@
+app = "senselink"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+  # PEAKSENSE_API_BASE = "https://peaksense.fly.dev"
+
+[processes]
+  app = "node src/index.js"
+
+[http_service]
+  internal_port = 8080
+  force_https = false
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+[[services]]
+  internal_port = 8080
+  protocol = "tcp"
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  [[services.ports]]
+    port = 8080
+    handlers = ["http"]
+
+[[checks]]
+  name = "alive"
+  type = "http"
+  port = 8080
+  path = "/health"
+  interval = "30s"
+  timeout = "5s"
+  processes = ["app"]
+
+[vm]
+  size = "shared-cpu-1x"
+  memory = "256mb"

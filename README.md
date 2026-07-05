@@ -86,25 +86,58 @@ If the API is reachable and commands are registered, you’ll see rich embeds.
 
 ## Production hosting
 
-### Railway (recommended free tier)
+### Fly.io (recommended)
+
+1. Install `flyctl`:
+   ```bash
+   # macOS / Linux
+   curl -L https://fly.io/install.sh | sh
+   # Windows (PowerShell)
+   powershell -Command "iwr https://fly.io/install.ps1 -useb | iex"
+   ```
+2. Authenticate:
+   ```bash
+   fly auth login
+   ```
+3. From the project folder, create the app:
+   ```bash
+   fly launch --name senselink --region iad --no-deploy
+   ```
+   - Choose **yes** to copy the existing `fly.toml`
+   - Choose **no** when asked to set up a Postgres or Redis
+4. Set the required secrets:
+   ```bash
+   fly secrets set DISCORD_TOKEN=your_token_here
+   fly secrets set DISCORD_CLIENT_ID=your_client_id_here
+   fly secrets set PEAKSENSE_API_BASE=https://peaksense.fly.dev
+   fly secrets set NODE_ENV=production
+   ```
+5. Register slash commands:
+   ```bash
+   npm run register   # or from any machine with the same env vars
+   ```
+6. Deploy:
+   ```bash
+   fly deploy
+   ```
+
+Fly.io keeps one machine running (`min_machines_running = 1`) so the bot is always online. The Dockerfile uses `node:20-slim`, installs only production dependencies, and runs as a non-root user.
+
+### Railway (free tier alternative)
 
 1. Push this folder to a GitHub repository.
-2. Go to https://railway.app/ and click **New Project** → **Deploy from GitHub repo**.
-3. Select the SenseLink repo.
-4. In **Variables**, add:
+2. Go to https://railway.app/ and create a new project from that repo.
+3. Add environment variables in the Railway dashboard:
    - `DISCORD_TOKEN`
    - `DISCORD_CLIENT_ID`
    - `PEAKSENSE_API_BASE`
    - `NODE_ENV=production`
-   - `GUILD_IDS` (optional; leave empty for global commands)
-5. Railway detects `package.json` and runs `npm start` automatically.
-
-No `Dockerfile`, `Procfile`, or `railway.json` is needed.
+   - `GUILD_IDS` (optional)
+4. Railway detects `package.json` and runs `npm start` automatically.
 
 ### Other free hosts
 
 - **Render**: use the Web Service template, set the env vars, and use `npm start` as the start command.
-- **Fly.io**: `fly launch` and set secrets with `fly secrets set`.
 - **Self-host**: any machine with Node 18+ and the env vars set.
 
 ## Environment variables
@@ -116,27 +149,32 @@ No `Dockerfile`, `Procfile`, or `railway.json` is needed.
 | `PEAKSENSE_API_BASE` | yes | `http://127.0.0.1:8081` | PeakSense API origin |
 | `GUILD_IDS` | no | — | Comma-separated dev server IDs for instant command registration |
 | `NODE_ENV` | no | `development` | `production` disables dev-only logs |
+| `HEALTH_PORT` | no | `8080` | Internal health-check port for Fly.io |
 
 ## Project structure
 
 ```
 src/
-  index.js              # bot entry point + interaction router
+  index.js              # bot entry point + health server + interaction router
   deploy-commands.js    # slash-command registration
   client.js             # PeakSense API HTTP client
   formatters.js         # Discord embed builders
   components.js         # buttons, dropdowns, component handler
   commands/index.js     # slash command definitions + handlers
+Dockerfile              # production container for Fly.io
+fly.toml                # Fly.io app configuration
 ```
 
 ## Useful commands
 
-| npm script | What it does |
+| npm script / command | What it does |
 |---|---|
-| `npm start` | Start the bot |
+| `npm start` | Start the bot + health server |
 | `npm run dev` | Start with file watcher |
 | `npm run register` | Register slash commands |
 | `npm run lint` | Lint with ESLint |
+| `fly deploy` | Deploy to Fly.io |
+| `fly logs` | Tail Fly.io logs |
 
 ## License
 

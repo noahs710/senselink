@@ -2,6 +2,7 @@ import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  EmbedBuilder,
   StringSelectMenuBuilder,
 } from 'discord.js';
 import {
@@ -169,6 +170,30 @@ export async function handleComponent(interaction, _client) {
   await interaction.reply({ content: 'That interaction is not supported yet.', ephemeral: true });
 }
 
+export function makeHelpEmbed() {
+  const base = (process.env.PEAKSENSE_API_BASE || 'http://127.0.0.1:8081').replace(/\/$/, '');
+  return new EmbedBuilder()
+    .setTitle('SenseLink — PeakSense Discord Bot')
+    .setDescription(
+      'A fast, read-only companion for the PeakSense public API.\n\n' +
+      'Use the commands below to browse profiles, dabs, leaderboards, and community feed.\n\n' +
+      'Most commands include buttons and dropdowns to keep navigating without retyping.'
+    )
+    .setColor(0x22c55e)
+    .addFields(
+      { name: '/profile', value: 'View a public profile + stats + achievements', inline: true },
+      { name: '/dab', value: 'Preview any dab by id', inline: true },
+      { name: '/leaderboard', value: 'Top ranked dabbers', inline: true },
+      { name: '/feed', value: 'Recent or trending public dabs', inline: true },
+      { name: '/dabs', value: "List a user's public dabs", inline: true },
+      { name: '/compare', value: 'Side-by-side stats duel', inline: true },
+      { name: '/share', value: 'Get a profile or dab share URL', inline: true },
+      { name: '/senselink', value: 'Invite link + this help panel', inline: true },
+    )
+    .setFooter({ text: 'SenseLink for PeakSense' })
+    .setURL(base);
+}
+
 function makeProfileRow(handle) {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder()
@@ -186,7 +211,7 @@ function makeProfileRow(handle) {
   );
 }
 
-function makeBackRow(action, handle) {
+export function makeBackRow(action, handle) {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setLabel('← Back to profile')
@@ -195,7 +220,7 @@ function makeBackRow(action, handle) {
   );
 }
 
-function makeLeaderboardRow() {
+export function makeLeaderboardRow() {
   return new ActionRowBuilder().addComponents(
     new StringSelectMenuBuilder()
       .setCustomId('leaderboard:period')
@@ -208,7 +233,7 @@ function makeLeaderboardRow() {
   );
 }
 
-function makeFeedRow() {
+export function makeFeedRow() {
   return new ActionRowBuilder().addComponents(
     new StringSelectMenuBuilder()
       .setCustomId('feed:period')
@@ -217,5 +242,24 @@ function makeFeedRow() {
         { label: 'Recent', value: 'recent', emoji: '🆕' },
         { label: 'Trending', value: 'trending', emoji: '🔥' },
       ),
+  );
+}
+
+export function makeDabRow(shareUrl, handle, dabId) {
+  const base = (process.env.PEAKSENSE_API_BASE || 'http://127.0.0.1:8081').replace(/\/$/, '');
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setLabel('Open on PeakSense')
+      .setURL(shareUrl)
+      .setStyle(ButtonStyle.Link),
+    new ButtonBuilder()
+      .setLabel('More from @' + handle)
+      .setCustomId(`profile:${handle}`)
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(!handle),
+    new ButtonBuilder()
+      .setLabel('Raw /dab/' + dabId.slice(0, 8))
+      .setURL(`${base}/dab/${encodeURIComponent(dabId)}`)
+      .setStyle(ButtonStyle.Link),
   );
 }

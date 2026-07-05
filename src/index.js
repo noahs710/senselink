@@ -1,14 +1,32 @@
+import http from 'node:http';
 import { Client, Events, GatewayIntentBits, ActivityType } from 'discord.js';
 import commands from './commands/index.js';
 import { handleComponent } from './components.js';
 
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 const PEAKSENSE_API_BASE = process.env.PEAKSENSE_API_BASE || 'http://127.0.0.1:8081';
+const HEALTH_PORT = Number(process.env.HEALTH_PORT || 8080);
 
 if (!DISCORD_TOKEN) {
   console.error('Missing DISCORD_TOKEN. Set it in .env and run npm run register.');
   process.exit(1);
 }
+
+// Lightweight HTTP health endpoint for Fly.io checks.
+const healthServer = http.createServer((req, res) => {
+  if (req.url === '/health') {
+    const ready = client.isReady();
+    res.writeHead(ready ? 200 : 503, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ ok: ready, uptime: process.uptime() }));
+    return;
+  }
+  res.writeHead(404);
+  res.end('not found');
+});
+
+healthServer.listen(HEALTH_PORT, () => {
+  console.log(`Health server listening on :${HEALTH_PORT}`);
+});
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds],
