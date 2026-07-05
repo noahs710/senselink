@@ -1,0 +1,32 @@
+{
+  "name": "senselink",
+  "version": "1.1.0",
+  "description": "Polished Discord bot that surfaces the entire PeakSense public API through slash commands, buttons, and dropdowns.",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "register": "node src/deploy-commands.js",
+    "lint": "eslint src",
+    "test": "node --test src/**/*.test.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "discord",
+    "bot",
+    "peaksense",
+    "puffco",
+    "leaderboard"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "discord.js": "^14.15.3"
+  },
+  "devDependencies": {
+    "eslint": "^8.57.0"
+  }
+}
