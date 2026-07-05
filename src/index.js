@@ -2,6 +2,8 @@ import http from 'node:http';
 import { Client, Events, GatewayIntentBits, ActivityType } from 'discord.js';
 import commands from './commands/index.js';
 import { handleComponent } from './components.js';
+import { normalizeHandle } from './client.js';
+import { searchHandles } from './handles.js';
 
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 const PEAKSENSE_API_BASE = process.env.PEAKSENSE_API_BASE || 'http://127.0.0.1:8081';
@@ -48,6 +50,16 @@ client.once(Events.ClientReady, () => {
 
 client.on(Events.InteractionCreate, async (interaction) => {
   try {
+    if (interaction.isAutocomplete()) {
+      const focused = interaction.options.getFocused(true);
+      if (focused.name === 'handle' || focused.name === 'handle1' || focused.name === 'handle2') {
+        const q = normalizeHandle(focused.value);
+        const choices = searchHandles(q).map((h) => ({ name: `@${h}`, value: h }));
+        return interaction.respond(choices);
+      }
+      return interaction.respond([]);
+    }
+
     if (interaction.isChatInputCommand()) {
       const command = client.commands.get(interaction.commandName);
       if (!command) return;
@@ -71,4 +83,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
 });
 
-await client.login(DISCORD_TOKEN);
+try {
+  await client.login(DISCORD_TOKEN);
+} catch (err) {
+  console.error('Failed to log in to Discord:', err);
+  process.exit(1);
+}

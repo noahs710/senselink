@@ -1,46 +1,65 @@
 import {
   ActionRowBuilder,
+  AttachmentBuilder,
   ButtonBuilder,
   ButtonStyle,
   EmbedBuilder,
   StringSelectMenuBuilder,
 } from 'discord.js';
 import {
-  getFeed,
   getLeaderboard,
   getUser,
   getUserAchievements,
   getUserDabs,
   getUserStats,
+  getAchievementsCatalog,
+  normalizeHandle,
 } from './client.js';
-import { feedEmbed, leaderboardEmbed, profileEmbed } from './formatters.js';
+import { profileEmbed, profileUrl, formatAchievementsFull } from './formatters.js';
+import { handlePaginator, restartPaginator } from './paginator.js';
+import { buildScoreTrend } from './chart.js';
 
 export async function handleComponent(interaction, _client) {
   const customId = interaction.customId;
   const [action, ...rest] = customId.split(':');
 
+  if (action === 'pg') {
+    return handlePaginator(interaction);
+  }
+
   if (action === 'profile') {
     await interaction.deferUpdate();
-    const handle = rest[0];
-    const [userRes, stats, achievements] = await Promise.all([
+    const handle = normalizeHandle(rest[0]);
+    const [userRes, stats, achievements, catalog, dabsPage] = await Promise.all([
       getUser(handle),
       getUserStats(handle).catch(() => null),
       getUserAchievements(handle).catch(() => []),
+      getAchievementsCatalog(),
+      getUserDabs(handle, undefined, 50).catch(() => null),
     ]);
     if (!userRes?.user) {
       return interaction.editReply({ content: `No user @${handle} found.`, embeds: [], components: [] });
     }
-    const embed = profileEmbed(userRes.user, stats?.stats ?? null, achievements?.achievements ?? []);
+    const trend = buildScoreTrend(dabsPage?.dabs ?? []);
+    const embed = profileEmbed(
+      userRes.user,
+      stats?.stats ?? null,
+      achievements?.achievements ?? [],
+      catalog,
+      trend ? 'attachment://score-trend.png' : null,
+    );
+    const files = trend ? [new AttachmentBuilder(trend, { name: 'score-trend.png' })] : [];
     return interaction.editReply({
       content: '',
       embeds: [embed],
       components: [makeProfileRow(handle)],
+      files,
     });
   }
 
   if (action === 'dabs') {
     await interaction.deferUpdate();
-    const handle = rest[0];
+    const handle = normalizeHandle(rest[0]);
     const page = await getUserDabs(handle);
     if (!page?.dabs?.length) {
       return interaction.editReply({ content: `No public dabs for @${handle}.`, embeds: [], components: [] });
@@ -64,18 +83,16 @@ export async function handleComponent(interaction, _client) {
 
   if (action === 'achievements') {
     await interaction.deferUpdate();
-    const handle = rest[0];
-    const [userRes, achievements] = await Promise.all([
+    const handle = normalizeHandle(rest[0]);
+    const [userRes, achievements, catalog] = await Promise.all([
       getUser(handle),
       getUserAchievements(handle).catch(() => []),
+      getAchievementsCatalog(),
     ]);
     if (!userRes?.user) {
       return interaction.editReply({ content: `No user @${handle} found.`, embeds: [], components: [] });
     }
-    const list = (achievements?.achievements ?? [])
-      .filter((a) => a.isVisible !== false)
-      .map((a) => `**${a.title}** — ${a.description}`)
-      .join('\n') || 'No achievements yet.';
+    const list = formatAchievementsFull(achievements?.achievements ?? [], catalog);
     return interaction.editReply({
       content: '',
       embeds: [{
@@ -89,7 +106,7 @@ export async function handleComponent(interaction, _client) {
   }
 
   if (action === 'compare-menu') {
-    const handle = rest[0];
+    const handle = normalizeHandle(rest[0]);
     const board = await getLeaderboard('all', 10);
     const options = (board?.entries ?? [])
       .filter((e) => e.user.handle !== handle)
@@ -115,8 +132,8 @@ export async function handleComponent(interaction, _client) {
 
   if (action === 'compare-run') {
     await interaction.deferUpdate();
-    const h1 = rest[0];
-    const h2 = interaction.values[0];
+    const h1 = normalizeHandle(rest[0]);
+    const h2 = normalizeHandle(interaction.values[0]);
     if (h2 === 'none') {
       return interaction.editReply({ content: 'No comparison available.', components: [] });
     }
@@ -145,33 +162,19 @@ export async function handleComponent(interaction, _client) {
   if (action === 'leaderboard') {
     await interaction.deferUpdate();
     const period = interaction.values?.[0] ?? 'all';
-    const board = await getLeaderboard(period, 10);
-    const embed = leaderboardEmbed(board?.entries, period);
-    return interaction.editReply({
-      content: '',
-      embeds: [embed],
-      components: [makeLeaderboardRow()],
-    });
+    return restartPaginator(interaction, 'leaderboard', { period });
   }
 
   if (action === 'feed') {
     await interaction.deferUpdate();
     const period = interaction.values?.[0] ?? 'recent';
-    const feed = await getFeed(10, null, period);
-    const entries = feed?.entries ?? feed?.dabs ?? feed?.items ?? [];
-    const embed = feedEmbed(entries);
-    return interaction.editReply({
-      content: '',
-      embeds: [embed],
-      components: [makeFeedRow()],
-    });
+    return restartPaginator(interaction, 'feed', { period });
   }
 
   await interaction.reply({ content: 'That interaction is not supported yet.', ephemeral: true });
 }
 
 export function makeHelpEmbed() {
-  const base = (process.env.PEAKSENSE_API_BASE || 'http://127.0.0.1:8081').replace(/\/$/, '');
   return new EmbedBuilder()
     .setTitle('SenseLink — PeakSense Discord Bot')
     .setDescription(
@@ -190,11 +193,10 @@ export function makeHelpEmbed() {
       { name: '/share', value: 'Get a profile or dab share URL', inline: true },
       { name: '/senselink', value: 'Invite link + this help panel', inline: true },
     )
-    .setFooter({ text: 'SenseLink for PeakSense' })
-    .setURL(base);
+    .setFooter({ text: 'SenseLink for PeakSense' });
 }
 
-function makeProfileRow(handle) {
+export function makeProfileRow(handle) {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setLabel('Recent dabs')
@@ -208,6 +210,10 @@ function makeProfileRow(handle) {
       .setLabel('Compare')
       .setCustomId(`compare-menu:${handle}`)
       .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setLabel('Share profile')
+      .setURL(profileUrl(handle))
+      .setStyle(ButtonStyle.Link),
   );
 }
 
@@ -217,31 +223,6 @@ export function makeBackRow(action, handle) {
       .setLabel('← Back to profile')
       .setCustomId(`${action}:${handle}`)
       .setStyle(ButtonStyle.Secondary),
-  );
-}
-
-export function makeLeaderboardRow() {
-  return new ActionRowBuilder().addComponents(
-    new StringSelectMenuBuilder()
-      .setCustomId('leaderboard:period')
-      .setPlaceholder('Pick a leaderboard period')
-      .addOptions(
-        { label: 'All time', value: 'all', emoji: '🏆' },
-        { label: 'This month', value: 'month', emoji: '📅' },
-        { label: 'This week', value: 'week', emoji: '🔥' },
-      ),
-  );
-}
-
-export function makeFeedRow() {
-  return new ActionRowBuilder().addComponents(
-    new StringSelectMenuBuilder()
-      .setCustomId('feed:period')
-      .setPlaceholder('Switch feed view')
-      .addOptions(
-        { label: 'Recent', value: 'recent', emoji: '🆕' },
-        { label: 'Trending', value: 'trending', emoji: '🔥' },
-      ),
   );
 }
 

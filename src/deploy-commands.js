@@ -1,5 +1,7 @@
 import commands from './commands/index.js';
 
+import 'dotenv/config';
+
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 const DISCORD_CLIENT_ID = process.env.DISCORD_CLIENT_ID;
 const GUILD_IDS = (process.env.GUILD_IDS || '')

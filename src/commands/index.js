@@ -1,19 +1,17 @@
-import { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } from 'discord.js';
+import { SlashCommandBuilder, EmbedBuilder, AttachmentBuilder } from 'discord.js';
 import {
   getDab,
   getDabLikes,
-  getFeed,
-  getLeaderboard,
   getUser,
   getUserAchievements,
   getUserDabs,
   getUserStats,
   getHealth,
+  getAchievementsCatalog,
+  normalizeHandle,
 } from '../client.js';
 import {
   dabEmbed,
-  feedEmbed,
-  leaderboardEmbed,
   profileEmbed,
   profileUrl,
   dabUrl,
@@ -21,10 +19,10 @@ import {
 import {
   makeDabRow,
   makeProfileRow,
-  makeLeaderboardRow,
-  makeFeedRow,
   makeHelpEmbed,
 } from '../components.js';
+import { startPaginator } from '../paginator.js';
+import { buildScoreTrend, buildDabTraceGraph } from '../chart.js';
 
 const commands = [
   {
@@ -34,22 +32,33 @@ const commands = [
       .addStringOption((o) =>
         o
           .setName('handle')
-          .setDescription('PeakSense handle, e.g. noah')
-          .setRequired(true),
+          .setDescription('PeakSense handle or display name (spaces ok)')
+          .setRequired(true)
+          .setAutocomplete(true),
       ),
     async execute(interaction) {
       await interaction.deferReply();
-      const handle = interaction.options.getString('handle').trim().replace(/^@/, '');
-      const [userRes, stats, achievements] = await Promise.all([
+      const handle = normalizeHandle(interaction.options.getString('handle'));
+      const [userRes, stats, achievements, catalog, dabsPage] = await Promise.all([
         getUser(handle),
         getUserStats(handle).catch(() => null),
         getUserAchievements(handle).catch(() => []),
+        getAchievementsCatalog(),
+        getUserDabs(handle, undefined, 50).catch(() => null),
       ]);
       if (!userRes?.user) {
         return interaction.editReply({ content: `No PeakSense user named **@${handle}**.` });
       }
-      const embed = profileEmbed(userRes.user, stats?.stats ?? null, achievements?.achievements ?? []);
-      return interaction.editReply({ embeds: [embed], components: [makeProfileRow(handle)] });
+      const trend = buildScoreTrend(dabsPage?.dabs ?? []);
+      const embed = profileEmbed(
+        userRes.user,
+        stats?.stats ?? null,
+        achievements?.achievements ?? [],
+        catalog,
+        trend ? 'attachment://score-trend.png' : null,
+      );
+      const files = trend ? [new AttachmentBuilder(trend, { name: 'score-trend.png' })] : [];
+      return interaction.editReply({ embeds: [embed], components: [makeProfileRow(handle)], files });
     },
   },
   {
@@ -73,11 +82,14 @@ const commands = [
         return interaction.editReply({ content: `No dab found with id \`${id}\`.` });
       }
       const dab = dabRes.dab;
-      const embed = dabEmbed(dab, likes);
+      const trace = buildDabTraceGraph(dab);
+      const embed = dabEmbed(dab, likes, trace ? 'attachment://dab-trace.png' : null);
       const handle = dab.user?.handle ?? '';
+      const files = trace ? [new AttachmentBuilder(trace, { name: 'dab-trace.png' })] : [];
       return interaction.editReply({
         embeds: [embed],
         components: [makeDabRow(dabUrl(id), handle, id)],
+        files,
       });
     },
   },
@@ -95,25 +107,11 @@ const commands = [
             { name: 'This month', value: 'month' },
             { name: 'This week', value: 'week' },
           ),
-      )
-      .addIntegerOption((o) =>
-        o
-          .setName('limit')
-          .setDescription('How many entries (1-25)')
-          .setMinValue(1)
-          .setMaxValue(25)
-          .setRequired(false),
       ),
     async execute(interaction) {
       await interaction.deferReply();
       const period = interaction.options.getString('period') ?? 'all';
-      const limit = interaction.options.getInteger('limit') ?? 10;
-      const board = await getLeaderboard(period, limit);
-      if (!board) {
-        return interaction.editReply({ content: 'Could not load the leaderboard right now.' });
-      }
-      const embed = leaderboardEmbed(board.entries, period);
-      return interaction.editReply({ embeds: [embed], components: [makeLeaderboardRow()] });
+      return startPaginator(interaction, 'leaderboard', { period });
     },
   },
   {
@@ -129,26 +127,11 @@ const commands = [
             { name: 'Recent', value: 'recent' },
             { name: 'Trending', value: 'trending' },
           ),
-      )
-      .addIntegerOption((o) =>
-        o
-          .setName('limit')
-          .setDescription('How many dabs (1-25)')
-          .setMinValue(1)
-          .setMaxValue(25)
-          .setRequired(false),
       ),
     async execute(interaction) {
       await interaction.deferReply();
       const period = interaction.options.getString('period') ?? 'recent';
-      const limit = interaction.options.getInteger('limit') ?? 10;
-      const feed = await getFeed(limit, null, period);
-      if (!feed) {
-        return interaction.editReply({ content: 'Could not load the feed right now.' });
-      }
-      const items = feed.entries ?? feed.dabs ?? feed.items ?? [];
-      const embed = feedEmbed(items);
-      return interaction.editReply({ embeds: [embed], components: [makeFeedRow()] });
+      return startPaginator(interaction, 'feed', { period });
     },
   },
   {
@@ -158,19 +141,21 @@ const commands = [
       .addStringOption((o) =>
         o
           .setName('handle1')
-          .setDescription('First PeakSense handle')
-          .setRequired(true),
+          .setDescription('First PeakSense handle or display name')
+          .setRequired(true)
+          .setAutocomplete(true),
       )
       .addStringOption((o) =>
         o
           .setName('handle2')
-          .setDescription('Second PeakSense handle')
-          .setRequired(true),
+          .setDescription('Second PeakSense handle or display name')
+          .setRequired(true)
+          .setAutocomplete(true),
       ),
     async execute(interaction) {
       await interaction.deferReply();
-      const h1 = interaction.options.getString('handle1').trim().replace(/^@/, '');
-      const h2 = interaction.options.getString('handle2').trim().replace(/^@/, '');
+      const h1 = normalizeHandle(interaction.options.getString('handle1'));
+      const h2 = normalizeHandle(interaction.options.getString('handle2'));
       const [u1, u2, s1, s2] = await Promise.all([
         getUser(h1),
         getUser(h2),
@@ -206,7 +191,7 @@ const commands = [
           .setName('profile')
           .setDescription('Profile share URL')
           .addStringOption((o) =>
-            o.setName('handle').setDescription('PeakSense handle').setRequired(true),
+            o.setName('handle').setDescription('PeakSense handle or display name').setRequired(true).setAutocomplete(true),
           ),
       )
       .addSubcommand((sc) =>
@@ -220,7 +205,7 @@ const commands = [
     async execute(interaction) {
       const sub = interaction.options.getSubcommand();
       if (sub === 'profile') {
-        const handle = interaction.options.getString('handle').trim().replace(/^@/, '');
+        const handle = normalizeHandle(interaction.options.getString('handle'));
         return interaction.reply({ content: profileUrl(handle) });
       }
       const id = interaction.options.getString('id').trim();
@@ -234,42 +219,23 @@ const commands = [
       .addStringOption((o) =>
         o
           .setName('handle')
-          .setDescription('PeakSense handle')
-          .setRequired(true),
-      )
-      .addIntegerOption((o) =>
-        o
-          .setName('limit')
-          .setDescription('How many (1-25)')
-          .setMinValue(1)
-          .setMaxValue(25)
-          .setRequired(false),
+          .setDescription('PeakSense handle or display name')
+          .setRequired(true)
+          .setAutocomplete(true),
       ),
     async execute(interaction) {
       await interaction.deferReply();
-      const handle = interaction.options.getString('handle').trim().replace(/^@/, '');
-      const limit = interaction.options.getInteger('limit') ?? 10;
-      const page = await getUserDabs(handle);
-      if (!page?.dabs?.length) {
-        return interaction.editReply({ content: `No public dabs found for @${handle}.` });
+      const handle = normalizeHandle(interaction.options.getString('handle'));
+      if (!handle) {
+        return interaction.editReply({ content: 'That does not look like a valid handle.' });
       }
-      const dabs = page.dabs.slice(0, limit);
-      const lines = dabs.map((d) =>
-        `• **${d.score}** (${d.grade}) — ${Math.round(d.tempF)}°F, ${Math.round(d.durationS)}s — [view](${dabUrl(d.id)})`,
-      );
-      const embed = new EmbedBuilder()
-        .setTitle(`Recent dabs — @${handle}`)
-        .setDescription(lines.join('\n'))
-        .setColor(0x22c55e)
-        .setFooter({ text: 'PeakSense • /dabs' });
-      return interaction.editReply({ embeds: [embed] });
+      return startPaginator(interaction, 'dabs', { handle });
     },
   },
   {
     data: new SlashCommandBuilder()
       .setName('status')
-      .setDescription('Check PeakSense API status and bot latency')
-      .setDefaultMemberPermissions(PermissionFlagsBits.SendMessages),
+      .setDescription('Check PeakSense API status and bot latency'),
     async execute(interaction) {
       await interaction.deferReply();
       const start = Date.now();
@@ -290,14 +256,12 @@ const commands = [
   {
     data: new SlashCommandBuilder()
       .setName('senselink')
-      .setDescription('Bot info, help, and invite link')
-      .setDefaultMemberPermissions(PermissionFlagsBits.SendMessages),
+      .setDescription('Bot info, help, and invite link'),
     async execute(interaction) {
       const invite = `https://discord.com/oauth2/authorize?client_id=${process.env.DISCORD_CLIENT_ID}&scope=bot%20applications.commands`;
-      const embed = makeHelpEmbed().setDescription(
-        makeHelpEmbed().data.description + `\n\n[Add SenseLink to your server](${invite})`,
-      );
-      return interaction.reply({ embeds: [embed] });
+      const help = makeHelpEmbed();
+      help.setDescription(help.data.description + `\n\n[Add SenseLink to your server](${invite})`);
+      return interaction.reply({ embeds: [help] });
     },
   },
 ];

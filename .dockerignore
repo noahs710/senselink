@@ -1,0 +1,32 @@
+# Dependency folders
+node_modules
+npm-debug.log*
+
+# Environment files (never ship secrets in the image)
+.env
+.env.*
+!.env.example
+
+# Git metadata
+.git
+.gitignore
+
+# Editor / IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Coverage / test artifacts
+coverage
+.nyc_output
+*.test.js
+
+# CI / docs that aren't needed at runtime
+README.md
+.eslintrc.json
+.github

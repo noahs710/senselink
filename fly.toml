@@ -4,6 +4,9 @@ primary_region = "iad"
 [build]
   dockerfile = "Dockerfile"
 
+[deploy]
+  strategy = "immediate"
+
 [env]
   NODE_ENV = "production"
   # PEAKSENSE_API_BASE = "https://peaksense.fly.dev"
