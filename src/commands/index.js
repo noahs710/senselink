@@ -22,6 +22,7 @@ import {
   profileUrl,
   dabUrl,
   chatEmbed,
+  CHAT_PAGE_SIZE,
 } from '../formatters.js';
 import {
   makeDabRow,
@@ -279,6 +280,10 @@ export const forwardChannelMessage = _forwardChannelMessageToLiveFeeds;
 
 export { SlashCommandBuilder };
 
+// Exported for component handlers (pagination buttons need to look
+// up feed entries and trigger a refresh).
+export { _siteFeeds, _roomFeeds, _refreshFeed };
+
 
 // ---------------------------------------------------------------------------
 // Live chat: per-message socket registry keyed by Discord message id. When a
@@ -457,8 +462,10 @@ function _forwardChannelMessageToLiveFeeds(message) {
 function _recentMessages(messages, max = 25) {
   return messages.slice(-max);
 }
-function _siteFeedRows(_messageId) {
-  return [
+function _siteFeedRows(messageId, pageIndex = 0, totalPages = 1) {
+  const rows = [];
+  // Row 1: link + leave
+  rows.push(
     new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setLabel("Open site chat")
@@ -469,11 +476,35 @@ function _siteFeedRows(_messageId) {
         .setCustomId("site-leave")
         .setStyle(ButtonStyle.Secondary),
     ),
-  ];
+  );
+  // Row 2: pagination (only when more than 1 page)
+  if (totalPages > 1) {
+    rows.push(
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`chatpg:${messageId}:older`)
+          .setLabel("◀ Older")
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(pageIndex <= 0),
+        new ButtonBuilder()
+          .setCustomId(`chatpg:${messageId}:page`)
+          .setLabel(`Page ${pageIndex + 1}/${totalPages}`)
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(true),
+        new ButtonBuilder()
+          .setCustomId(`chatpg:${messageId}:newer`)
+          .setLabel("Newer ▶")
+          .setStyle(ButtonStyle.Primary)
+          .setDisabled(pageIndex >= totalPages - 1),
+      ),
+    );
+  }
+  return rows;
 }
 
-function _roomFeedRows(_messageId, _code) {
-  return [
+function _roomFeedRows(messageId, code, pageIndex = 0, totalPages = 1) {
+  const rows = [];
+  rows.push(
     new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setLabel("Open in PeakSense")
@@ -484,7 +515,29 @@ function _roomFeedRows(_messageId, _code) {
         .setCustomId("room-leave")
         .setStyle(ButtonStyle.Secondary),
     ),
-  ];
+  );
+  if (totalPages > 1) {
+    rows.push(
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`chatpg:${messageId}:older`)
+          .setLabel("◀ Older")
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(pageIndex <= 0),
+        new ButtonBuilder()
+          .setCustomId(`chatpg:${messageId}:page`)
+          .setLabel(`Page ${pageIndex + 1}/${totalPages}`)
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(true),
+        new ButtonBuilder()
+          .setCustomId(`chatpg:${messageId}:newer`)
+          .setLabel("Newer ▶")
+          .setStyle(ButtonStyle.Primary)
+          .setDisabled(pageIndex >= totalPages - 1),
+      ),
+    );
+  }
+  return rows;
 }
 
 
@@ -656,6 +709,15 @@ function _refreshFeed(interaction, entry, kind, code) {
 
 async function _doRefresh(interaction, entry, kind, code) {
   const list = _recentMessages(entry.messages);
+  // Compute pagination: each page shows CHAT_PAGE_SIZE lines.  When
+  // new messages arrive on the live page, we bump the user to the
+  // last page (newest).  If they've paged back, we stay on their
+  // current page but totalPages grows.
+  const totalPages = Math.max(1, Math.ceil(list.length / CHAT_PAGE_SIZE));
+  const pageIndex = entry.pageIndex != null
+    ? Math.min(entry.pageIndex, totalPages - 1)
+    : totalPages - 1;
+  entry.pageIndex = pageIndex;
   // Resolve profiles for any messages that carry a real handle so
   // the embed can render clickable author links.  Profiles are cached
   // in client.js for 6h so this is synchronous after first resolve.
@@ -682,14 +744,14 @@ async function _doRefresh(interaction, entry, kind, code) {
     kind,
     code,
     messages: list,
-    pageIndex: 0,
-    totalPages: 1,
+    pageIndex,
+    totalPages,
     profiles,
     author,
   });
   await interaction.editReply({
     embeds: [embed],
-    components: kind === 'site' ? _siteFeedRows(entry.messageId) : _roomFeedRows(entry.messageId, code),
+    components: kind === 'site' ? _siteFeedRows(entry.messageId, pageIndex, totalPages) : _roomFeedRows(entry.messageId, code, pageIndex, totalPages),
   });
 }
 
@@ -779,7 +841,7 @@ const _chatCmd = {
     const history = await getSiteChat(limit).catch(() => null);
     const messages = (history && Array.isArray(history.messages)) ? history.messages.slice().reverse() : [];
     const embed = chatEmbed({ kind: 'site', messages });
-    const rows = _siteFeedRows('0');
+    const rows = _siteFeedRows('0', 0, 1);
     const reply = await interaction.editReply({ embeds: [embed], components: rows, fetchReply: true });
 
     const entry = {
@@ -900,7 +962,7 @@ const _roomCmd = {
       messages: [],
       title: `🎮 Room ${code}`,
     });
-    const rows = _roomFeedRows('0', code);
+    const rows = _roomFeedRows('0', code, 0, 1);
     const reply = await interaction.editReply({ embeds: [embed], components: rows, fetchReply: true });
     const entry = {
       messageId: reply.id,

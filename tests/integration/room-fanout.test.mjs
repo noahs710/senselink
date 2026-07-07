@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makeCommandHarness, embedDescription } from './_helper.mjs';
+import { makeCommandHarness, embedText } from './_helper.mjs';
 
 process.env.PEAKSENSE_API_BASE = process.env.PEAKSENSE_API_BASE || 'https://peaksense.fly.dev';
 
@@ -32,7 +32,7 @@ test('room-fanout: WS CHAT frame updates the live room embed', async () => {
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 100));
     const edits = messages.get(target)?.edits || [];
-    found = edits.find((e) => embedDescription(e).includes(text));
+    found = edits.find((e) => embedText(e).includes(text));
     if (found) break;
   }
   sockets.releaseRoomSocket(TEST_CODE);

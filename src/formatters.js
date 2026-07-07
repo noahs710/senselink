@@ -245,18 +245,32 @@ function formatChatLine(msg, maxLen = 80, profiles = null) {
   return `${warn}${author} — ${truncated}${ts}`;
 }
 
+export const CHAT_PAGE_SIZE = 10;
+
 /**
  * Build a chat embed (site chat or room chat). `kind` is "site" or
- * "room"; `code` is the room code when kind==="room". `messages` is
- * the array to render (newest last so the embed reads top-to-bottom
- * chronologically).  `profiles` is an optional Map<handle, {profile}>
- * used to render clickable author links.  `author` is an optional
- * resolved profile for the embed setAuthor header.
+ * "room"; `code` is the room code when kind==="room". `messages` is the
+ * full array (newest last, oldest-first chronological).  `pageIndex`
+ * selects which 6-line window to show in the description; older lines
+ * are summarized in an "Earlier messages" embed field grouped in
+ * 1-minute windows.  `profiles` is an optional Map<handle, {profile}>.
+ * `author` is an optional resolved profile for the embed setAuthor.
  */
 export function chatEmbed({ kind, code = null, messages = [], title = null, pageIndex = 0, totalPages = 1, profiles = null, author = null, footerText = null }) {
   const isSite = kind === 'site';
   const list = Array.isArray(messages) ? messages : [];
-  const lines = list.map((m) => formatChatLine(m, isSite ? 90 : 80, profiles)).filter(Boolean);
+  totalPages = Math.max(1, totalPages);
+  pageIndex = Math.max(0, Math.min(pageIndex, totalPages - 1));
+
+  // Determine which slice of messages to show in the description.
+  // The last page (newest) is pageIndex = totalPages - 1.  We show
+  // CHAT_PAGE_SIZE lines per page from the end of the list.
+  const totalLines = list.length;
+  const endIdx = totalLines - (totalPages - 1 - pageIndex) * CHAT_PAGE_SIZE;
+  const startIdx = Math.max(0, endIdx - CHAT_PAGE_SIZE);
+  const pageMessages = list.slice(startIdx, endIdx);
+
+  const lines = pageMessages.map((m) => formatChatLine(m, isSite ? 90 : 80, profiles)).filter(Boolean);
   const body = lines.join('\n') || (isSite ? 'No one has said anything yet. Break the ice?' : 'Room is quiet. Send the first message.');
 
   const embed = new EmbedBuilder()
@@ -274,6 +288,28 @@ export function chatEmbed({ kind, code = null, messages = [], title = null, page
 
   if (author?.profileUrl) {
     embed.setAuthor({ name: author.displayName || author.handle, url: author.profileUrl, ...(author.avatarUrl ? { iconURL: author.avatarUrl } : {}) });
+  }
+
+  // "Earlier messages" field: group older messages (those before the
+  // current page's start) in 1-minute windows with a count.  Only show
+  // when we're on the first page (oldest) so the field summarises
+  // everything before the current view.
+  if (startIdx > 0) {
+    const older = list.slice(0, startIdx);
+    const groups = {};
+    for (const m of older) {
+      const ts = m.createdAt || m._localSeq * 1000 || 0;
+      const d = new Date(ts);
+      if (isNaN(d.getTime())) continue;
+      const key = d.toISOString().slice(0, 16); // YYYY-MM-DDTHH:MM
+      groups[key] = (groups[key] || 0) + 1;
+    }
+    const groupLines = Object.entries(groups)
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([k, n]) => `${k.replace('T', ' ')} — ${n} message${n === 1 ? '' : 's'}`);
+    if (groupLines.length > 0) {
+      embed.addFields({ name: 'Earlier messages', value: groupLines.join('\n').slice(0, 1024) });
+    }
   }
 
   const footerParts = ['SenseLink', isSite ? '/chat' : '/room'];

@@ -172,6 +172,32 @@ export async function handleComponent(interaction, _client) {
   }
 
   
+  if (action === 'chatpg') {
+    await interaction.deferUpdate();
+    const [messageId, dir] = rest;
+    // Find the feed entry by messageId across both site and room feeds.
+    const { _siteFeeds, _roomFeeds, _refreshFeed } = await import('./commands/index.js');
+    let entry = _siteFeeds.get(messageId);
+    let kind = 'site';
+    let code = null;
+    if (!entry) {
+      for (const [id, e] of _roomFeeds) {
+        if (id === messageId) { entry = e; kind = 'room'; code = e.code; break; }
+      }
+    }
+    if (!entry) {
+      return interaction.followUp({ content: 'This chat feed is no longer active.', ephemeral: true }).catch(() => {});
+    }
+    if (dir === 'older') {
+      entry.pageIndex = Math.max(0, (entry.pageIndex || 0) - 1);
+    } else if (dir === 'newer') {
+      const totalPages = Math.max(1, Math.ceil(entry.messages.length / 10));
+      entry.pageIndex = Math.min(totalPages - 1, (entry.pageIndex || 0) + 1);
+    }
+    _refreshFeed(entry.interaction || interaction, entry, kind, code);
+    return;
+  }
+
   if (action === 'site-leave' || action === 'room-leave') {
     await interaction.deferUpdate();
     const { _detachSiteFeedForChannel, _detachRoomFeedForChannel } = await import('./commands/index.js');

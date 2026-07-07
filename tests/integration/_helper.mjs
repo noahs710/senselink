@@ -101,3 +101,20 @@ export function embedDescription(edit) {
   if (!emb) return '';
   return emb.data?.description ?? emb.description ?? '';
 }
+
+/**
+ * Extract all text from an embed (description + field values) so
+ * tests can find text that was pushed off the visible page into an
+ * "Earlier messages" field by pagination.
+ */
+export function embedText(edit) {
+  const emb = edit?.embeds?.[0];
+  if (!emb) return '';
+  const d = emb.data ?? emb;
+  let text = d.description ?? '';
+  const fields = d.fields ?? [];
+  for (const f of fields) {
+    text += '\n' + (f.value ?? '');
+  }
+  return text;
+}
