@@ -171,7 +171,19 @@ export async function handleComponent(interaction, _client) {
     return restartPaginator(interaction, 'feed', { period });
   }
 
-  await interaction.reply({ content: 'That interaction is not supported yet.', ephemeral: true });
+  
+  if (action === 'site-leave' || action === 'room-leave') {
+    await interaction.deferUpdate();
+    const { _detachSiteFeedForChannel, _detachRoomFeedForChannel } = await import('./commands/index.js');
+    const site = _detachSiteFeedForChannel(interaction.channelId, null, { authorOnly: false });
+    const room = _detachRoomFeedForChannel(interaction.channelId, null);
+    const stopped = site + room;
+    return interaction.followUp({
+      content: stopped ? 'Stopped ' + stopped + ' live feed' + (stopped === 1 ? '' : 's') + ' in this channel.' : 'No active live feed in this channel.',
+      ephemeral: true,
+    }).catch(() => {});
+  }
+await interaction.reply({ content: 'That interaction is not supported yet.', ephemeral: true });
 }
 
 export function makeHelpEmbed() {
@@ -191,6 +203,8 @@ export function makeHelpEmbed() {
       { name: '/dabs', value: "List a user's public dabs", inline: true },
       { name: '/compare', value: 'Side-by-side stats duel', inline: true },
       { name: '/share', value: 'Get a profile or dab share URL', inline: true },
+      { name: '/chat', value: '`/chat join` opens the site-wide chat live feed; regular messages are forwarded until you `/chat leave`', inline: true },
+      { name: '/room', value: '`/room join code:XXX` opens a room feed; regular messages are forwarded until you `/room leave`', inline: true },
       { name: '/senselink', value: 'Invite link + this help panel', inline: true },
     )
     .setFooter({ text: 'SenseLink for PeakSense' });

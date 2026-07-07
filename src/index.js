@@ -1,6 +1,6 @@
 import http from 'node:http';
 import { Client, Events, GatewayIntentBits, ActivityType } from 'discord.js';
-import commands from './commands/index.js';
+import commands, { forwardChannelMessage } from './commands/index.js';
 import { handleComponent } from './components.js';
 import { normalizeHandle } from './client.js';
 import { searchHandles } from './handles.js';
@@ -31,7 +31,7 @@ healthServer.listen(HEALTH_PORT, () => {
 });
 
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds],
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
 });
 
 client.commands = new Map();
@@ -46,6 +46,17 @@ client.once(Events.ClientReady, () => {
     type: ActivityType.Watching,
   });
   console.log(`PeakSense API base: ${PEAKSENSE_API_BASE}`);
+});
+
+
+client.on(Events.MessageCreate, async (message) => {
+  if (!message || message.author?.bot) return;
+  // Forward any non-command channel message to the active live feed,
+  // if /chat join or /room join is open in this channel. Slash commands
+  // and DMs are intentionally ignored.
+  if (!message.guild) return;
+  if (message.content && message.content.startsWith('/')) return;
+  try { forwardChannelMessage(message); } catch (err) { console.error('textwatcher failed', err); }
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {

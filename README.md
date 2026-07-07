@@ -13,6 +13,8 @@ A polished Discord bot for [PeakSense](https://github.com/nousresearch/peaksense
 - **Status** — `/status` checks PeakSense API health and bot latency.
 - **Help** — `/senselink` shows the full command list and invite link.
 
+- **Site chat** — `/chat join` opens a live embed of PeakSense's site-wide chat that updates in place as new lines stream over the WebSocket. While it is open, any non-command message you send in that channel is forwarded to site chat (no confirmation reply, just a new line in the embed). `/chat leave` stops the live feed in the channel. The embed also has a Leave chat button.
+- **Rooms** — `/room join code:<code> [role] [nickname]` connects to a PeakSense battle-room websocket (default role: spectator) and edits a single embed with the live room chat. While the live feed is open in the channel, any non-command message you send is forwarded to the room. `/room leave` stops every active room feed in the channel.
 ## Public API endpoints used
 
 The bot is read-only and uses every anonymous-friendly PeakSense endpoint:

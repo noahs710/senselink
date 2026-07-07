@@ -1,4 +1,4 @@
-import { EmbedBuilder } from 'discord.js';
+﻿import { EmbedBuilder } from 'discord.js';
 
 const PERIOD_LABELS = {
   all: 'All time',
@@ -199,6 +199,56 @@ export function dabsListEmbed(handle, dabs, pageIndex = 0) {
     .setFooter({ text: `Page ${pageIndex + 1} • SenseLink • /dabs` })
     .setTimestamp();
 }
+
+
+/**
+ * Format a single chat message for the "most recent N" view inside
+ * the live chat embeds. Truncates body to fit Discord's 1024-char
+ * description limit; truncates author to 32 chars to leave room.
+ */
+function formatChatLine(msg, maxLen = 80) {
+  if (!msg) return '';
+  const who = msg.displayName || msg.nickname || (msg.handle ? '@' + msg.handle : 'Guest');
+  const whoSafe = String(who).replace(/\s+/g, ' ').trim().slice(0, 32) || 'Guest';
+  const text = String(msg.text ?? '').replace(/\s+/g, ' ').trim();
+  if (text.length > maxLen) {
+    return `**${whoSafe}**: ${text.slice(0, maxLen - 1)}…`;
+  }
+  return `**${whoSafe}**: ${text}`;
+}
+
+/**
+ * Build a chat embed (site chat or room chat). `kind` is "site" or
+ * "room"; `code` is the room code when kind==="room". `messages` is
+ * the array to render (newest last so the embed reads top-to-bottom
+ * chronologically).
+ */
+export function chatEmbed({ kind, code = null, messages = [], title = null, pageIndex = 0, totalPages = 1 }) {
+  const isSite = kind === 'site';
+  const list = Array.isArray(messages) ? messages : [];
+  const lines = list.map((m) => formatChatLine(m, isSite ? 90 : 80)).filter(Boolean);
+  const body = lines.join('\n') || (isSite ? 'No one has said anything yet. Break the ice?' : 'Room is quiet. Send the first message.');
+
+  const embed = new EmbedBuilder()
+    .setColor(isSite ? 0x22c55e : 0x38bdf8)
+    .setDescription(body.slice(0, 4000))
+    .setTimestamp();
+
+  if (title) {
+    embed.setTitle(title);
+  } else if (isSite) {
+    embed.setTitle('🌐 Site chat');
+  } else {
+    embed.setTitle(`🎮 Room ${code}`);
+  }
+
+  const footerParts = ['SenseLink', isSite ? '/chat' : '/room'];
+  if (totalPages > 1) footerParts.push(`Page ${pageIndex + 1}/${totalPages}`);
+  embed.setFooter({ text: footerParts.join(' • ') });
+
+  return embed;
+}
+
 
 function gradeColor(grade) {
   switch (grade) {
