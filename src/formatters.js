@@ -257,7 +257,7 @@ export const CHAT_PAGE_SIZE = 10;
  * 1-minute windows.  `profiles` is an optional Map<handle, {profile}>.
  * `author` is an optional resolved profile for the embed setAuthor.
  */
-export function chatEmbed({ kind, code = null, messages = [], title = null, pageIndex = 0, totalPages = 1, profiles = null, author = null, footerText = null, presence = null }) {
+export function chatEmbed({ kind, code = null, messages = [], title = null, pageIndex = 0, totalPages = 1, profiles = null, author = null, footerText = null, presence = null, typing = null }) {
   const isSite = kind === 'site';
   const list = Array.isArray(messages) ? messages : [];
   totalPages = Math.max(1, totalPages);
@@ -272,7 +272,11 @@ export function chatEmbed({ kind, code = null, messages = [], title = null, page
   const pageMessages = list.slice(startIdx, endIdx);
 
   const lines = pageMessages.map((m) => formatChatLine(m, isSite ? 90 : 80, profiles)).filter(Boolean);
-  const body = lines.join('\n') || (isSite ? 'No one has said anything yet. Break the ice?' : 'Room is quiet. Send the first message.');
+  let body = lines.join('\n') || (isSite ? 'No one has said anything yet. Break the ice?' : 'Room is quiet. Send the first message.');
+  // Typing indicator: append a transient line at the bottom.
+  if (typing) {
+    body += '\n' + typing + ' is typing…';
+  }
 
   const embed = new EmbedBuilder()
     .setColor(isSite ? 0x22c55e : 0x38bdf8)

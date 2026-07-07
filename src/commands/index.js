@@ -578,11 +578,33 @@ function _wireSiteSocketFanout() {
       }
       return;
     }
+    if (t === 'TYPING') {
+      // Typing indicator: set entry.typing and refresh; the indicator
+      // auto-clears on the next real SITE_CHAT or after 3s.
+      for (const sess of _siteSessions.values()) {
+        if (!sess?.entry) continue;
+        const entry = sess.entry;
+        if (entry._typingTimer) { clearTimeout(entry._typingTimer); entry._typingTimer = null; }
+        entry.typing = d?.displayName || d?.handle || 'Someone';
+        _refreshFeed(entry.interaction || { editReply: async () => {} }, entry, 'site');
+        entry._typingTimer = setTimeout(() => {
+          entry.typing = null;
+          entry._typingTimer = null;
+          _refreshFeed(entry.interaction || { editReply: async () => {} }, entry, 'site');
+        }, 3000);
+      }
+      return;
+    }
     if (t !== 'SITE_CHAT') return;
     if (!d || !d.text) return;
     for (const sess of _siteSessions.values()) {
       if (!sess || !sess.entry) continue;
       const entry = sess.entry;
+      // Clear typing indicator on real message.
+      if (entry.typing || entry._typingTimer) {
+        entry.typing = null;
+        if (entry._typingTimer) { clearTimeout(entry._typingTimer); entry._typingTimer = null; }
+      }
       // Track the highest createdAt so resync knows where to pick up.
       if (d.createdAt != null && (!entry.highestSeenCreatedAt || d.createdAt > entry.highestSeenCreatedAt)) {
         entry.highestSeenCreatedAt = d.createdAt;
@@ -678,12 +700,33 @@ function _wireRoomSocketFanout(code) {
       }
       return;
     }
+    if (t === 'TYPING') {
+      for (const [key, sess] of _roomSessions) {
+        if (!key.endsWith(':' + code)) continue;
+        if (!sess?.entry) continue;
+        const entry = sess.entry;
+        if (entry._typingTimer) { clearTimeout(entry._typingTimer); entry._typingTimer = null; }
+        entry.typing = d?.nickname || d?.displayName || 'Someone';
+        _refreshFeed(entry.interaction || { editReply: async () => {} }, entry, 'room', code);
+        entry._typingTimer = setTimeout(() => {
+          entry.typing = null;
+          entry._typingTimer = null;
+          _refreshFeed(entry.interaction || { editReply: async () => {} }, entry, 'room', code);
+        }, 3000);
+      }
+      return;
+    }
     if (t !== 'CHAT') return;
     if (!d || !d.text) return;
     for (const [key, sess] of _roomSessions) {
       if (!key.endsWith(':' + code)) continue;
       if (!sess || !sess.entry) continue;
       const entry = sess.entry;
+      // Clear typing indicator on real message.
+      if (entry.typing || entry._typingTimer) {
+        entry.typing = null;
+        if (entry._typingTimer) { clearTimeout(entry._typingTimer); entry._typingTimer = null; }
+      }
       // De-dupe: same FIFO match-by-text + nickname approach as site.
       const match = entry.messages.find((m) =>
         m._local && !m._serverEchoed && m.text === d.text &&
@@ -773,6 +816,7 @@ async function _doRefresh(interaction, entry, kind, code) {
     author,
     presence: kind === 'room' ? (entry.presence || null) : null,
     footerText: entry.closed ? 'Live feed stopped · /chat join to resume' : null,
+    typing: entry.typing || null,
   });
   await interaction.editReply({
     embeds: [embed],
