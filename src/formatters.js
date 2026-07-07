@@ -202,31 +202,61 @@ export function dabsListEmbed(handle, dabs, pageIndex = 0) {
 
 
 /**
- * Format a single chat message for the "most recent N" view inside
- * the live chat embeds. Truncates body to fit Discord's 1024-char
- * description limit; truncates author to 32 chars to leave room.
+ * Relative time prefix for chat lines.  Returns "· just now" for
+ * <60s, "· 2m ago" for minutes, "· 1h ago" for hours.  Returns ''
+ * when the timestamp is missing or invalid.
  */
-function formatChatLine(msg, maxLen = 80) {
+function relativeTime(ms) {
+  if (!ms || typeof ms !== 'number') return '';
+  const diff = Date.now() - ms;
+  if (diff < 0 || diff > 24 * 60 * 60 * 1000) return '';
+  if (diff < 60_000) return ' · just now';
+  const m = Math.floor(diff / 60_000);
+  if (m < 60) return ` · ${m}m ago`;
+  const h = Math.floor(m / 60);
+  return ` · ${h}h ago`;
+}
+
+/**
+ * Format a single chat message for the "most recent N" view inside
+ * the live chat embeds.  When a profile map is supplied and the
+ * message has a real handle, the author becomes a clickable markdown
+ * link: [DisplayName](profileUrl).  Guest lines (no handle) render
+ * as plain bold.  Truncates body to fit; adds ⚠ for failed sends and
+ * a relative-time suffix.
+ */
+function formatChatLine(msg, maxLen = 80, profiles = null) {
   if (!msg) return '';
-  const who = msg.displayName || msg.nickname || (msg.handle ? '@' + msg.handle : 'Guest');
+  const handle = msg.handle || null;
+  const profile = (handle && profiles?.get(handle)) || null;
+  const who = msg.displayName || msg.nickname || (handle ? '@' + handle : 'Guest');
   const whoSafe = String(who).replace(/\s+/g, ' ').trim().slice(0, 32) || 'Guest';
   const text = String(msg.text ?? '').replace(/\s+/g, ' ').trim();
-  if (text.length > maxLen) {
-    return `**${whoSafe}**: ${text.slice(0, maxLen - 1)}…`;
-  }
-  return `**${whoSafe}**: ${text}`;
+  if (!text) return '';
+
+  // Clickable profile link for site users, plain bold for guests.
+  const author = profile?.profileUrl
+    ? `[${whoSafe}](${profile.profileUrl})`
+    : `**${whoSafe}**`;
+
+  const warn = msg._failed ? '⚠ ' : '';
+  const ts = relativeTime(msg._failed ? undefined : msg.createdAt);
+  const truncated = text.length > maxLen ? text.slice(0, maxLen - 1) + '…' : text;
+  return `${warn}${author} — ${truncated}${ts}`;
 }
 
 /**
  * Build a chat embed (site chat or room chat). `kind` is "site" or
  * "room"; `code` is the room code when kind==="room". `messages` is
  * the array to render (newest last so the embed reads top-to-bottom
- * chronologically).
+ * chronologically).  `profiles` is an optional Map<handle, {profile}>
+ * used to render clickable author links.  `author` is an optional
+ * resolved profile for the embed setAuthor header.
  */
-export function chatEmbed({ kind, code = null, messages = [], title = null, pageIndex = 0, totalPages = 1 }) {
+export function chatEmbed({ kind, code = null, messages = [], title = null, pageIndex = 0, totalPages = 1, profiles = null, author = null, footerText = null }) {
   const isSite = kind === 'site';
   const list = Array.isArray(messages) ? messages : [];
-  const lines = list.map((m) => formatChatLine(m, isSite ? 90 : 80)).filter(Boolean);
+  const lines = list.map((m) => formatChatLine(m, isSite ? 90 : 80, profiles)).filter(Boolean);
   const body = lines.join('\n') || (isSite ? 'No one has said anything yet. Break the ice?' : 'Room is quiet. Send the first message.');
 
   const embed = new EmbedBuilder()
@@ -242,7 +272,12 @@ export function chatEmbed({ kind, code = null, messages = [], title = null, page
     embed.setTitle(`🎮 Room ${code}`);
   }
 
+  if (author?.profileUrl) {
+    embed.setAuthor({ name: author.displayName || author.handle, url: author.profileUrl, ...(author.avatarUrl ? { iconURL: author.avatarUrl } : {}) });
+  }
+
   const footerParts = ['SenseLink', isSite ? '/chat' : '/room'];
+  if (footerText) footerParts.push(footerText);
   if (totalPages > 1) footerParts.push(`Page ${pageIndex + 1}/${totalPages}`);
   embed.setFooter({ text: footerParts.join(' • ') });
 

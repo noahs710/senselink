@@ -14,6 +14,7 @@ import {
   normalizeRoomCode,
   trimChat,
   getSiteChat,
+  resolveProfile,
 } from '../client.js';
 import {
   dabEmbed,
@@ -570,25 +571,72 @@ function _wireRoomSocketFanout(code) {
   });
 }
 
-async function _refreshFeed(interaction, entry, kind, code) {
+// Coalesce in-flight refreshes: if a refresh is already running for
+// this entry, subsequent callers await the same Promise and then
+// check if a newer refresh is needed. This prevents busy channels
+// from flickering and burning the 5/5s Discord edit rate budget.
+function _refreshFeed(interaction, entry, kind, code) {
+  if (entry._pendingRefresh) {
+    // Mark that a newer refresh was requested while one was in flight;
+    // the in-flight refresh will pick this up and re-run.
+    entry._refreshDirty = true;
+    return entry._pendingRefresh;
+  }
+  entry._pendingRefresh = (async () => {
+    for (;;) {
+      entry._refreshDirty = false;
+      try {
+        await _doRefresh(interaction, entry, kind, code);
+      } catch (err) {
+        // Message may have been deleted; just drop the feed.
+        if (kind === 'site') _siteFeeds.delete(entry.messageId);
+        else _roomFeeds.delete(entry.messageId);
+        break;
+      }
+      if (!entry._refreshDirty) break;
+    }
+    entry._pendingRefresh = null;
+  })();
+  return entry._pendingRefresh;
+}
+
+async function _doRefresh(interaction, entry, kind, code) {
   const list = _recentMessages(entry.messages);
+  // Resolve profiles for any messages that carry a real handle so
+  // the embed can render clickable author links.  Profiles are cached
+  // in client.js for 6h so this is synchronous after first resolve.
+  const handles = new Set();
+  for (const m of list) {
+    if (m.handle) handles.add(m.handle);
+  }
+  let profiles = null;
+  if (handles.size > 0) {
+    profiles = new Map();
+    const results = await Promise.all(
+      [...handles].map(async (h) => [h, await resolveProfile(h)]),
+    );
+    for (const [h, p] of results) {
+      if (p) profiles.set(h, p);
+    }
+  }
+  // Resolve the embed author (opener's profile) for site feeds.
+  let author = null;
+  if (kind === 'site' && entry.authorHandle) {
+    author = await resolveProfile(entry.authorHandle).catch(() => null);
+  }
   const embed = chatEmbed({
     kind,
     code,
     messages: list,
     pageIndex: 0,
     totalPages: 1,
+    profiles,
+    author,
   });
-  try {
-    await interaction.editReply({
-      embeds: [embed],
-      components: kind === 'site' ? _siteFeedRows(entry.messageId) : _roomFeedRows(entry.messageId, code),
-    });
-  } catch (err) {
-    // Message may have been deleted; just drop the feed.
-    if (kind === 'site') _siteFeeds.delete(entry.messageId);
-    else _roomFeeds.delete(entry.messageId);
-  }
+  await interaction.editReply({
+    embeds: [embed],
+    components: kind === 'site' ? _siteFeedRows(entry.messageId) : _roomFeedRows(entry.messageId, code),
+  });
 }
 
 

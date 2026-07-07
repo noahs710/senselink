@@ -127,6 +127,37 @@ export async function getUser(handle) {
   return res;
 }
 
+/**
+ * Resolve a PeakSense user profile by handle with a 6-hour in-process
+ * cache.  Returns { handle, displayName, avatarUrl, profileUrl } on
+ * success, or null when the handle does not exist.  The cache is
+ * synchronous after the first resolve: subsequent calls with the same
+ * handle return the cached value immediately (via a cached promise).
+ */
+const _profileCache = new Map(); // handle -> Promise<{...} | null>
+const PROFILE_TTL_MS = 6 * 60 * 60 * 1000;
+
+export function resolveProfile(handle) {
+  if (!handle) return Promise.resolve(null);
+  const h = String(handle);
+  const entry = _profileCache.get(h);
+  if (entry && Date.now() - entry.at < PROFILE_TTL_MS) return entry.promise;
+  const promise = getUser(h)
+    .then((res) => {
+      const u = res?.user;
+      if (!u?.handle) return null;
+      return {
+        handle: u.handle,
+        displayName: u.displayName || u.handle,
+        avatarUrl: u.avatarUrl || '',
+        profileUrl: `${PEAKSENSE_API_BASE}/u/${encodeURIComponent(u.handle)}`,
+      };
+    })
+    .catch(() => null);
+  _profileCache.set(h, { promise, at: Date.now() });
+  return promise;
+}
+
 export async function getUserDabs(handle, cursor, limit) {
   const params = new URLSearchParams();
   if (cursor) params.set('cursor', cursor);
