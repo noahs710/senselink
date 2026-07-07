@@ -504,11 +504,23 @@ function _wireSiteSocketFanout() {
   _siteFanoutWired = true;
   const sock = getSiteSocket();
   sock.on((t, d) => {
+    if (t === 'open') {
+      // Socket (re)connected — backfill any messages missed while
+      // disconnected.  We fire for every active site session.
+      for (const sess of _siteSessions.values()) {
+        if (sess?.entry) _resyncSiteFeed(sess.entry);
+      }
+      return;
+    }
     if (t !== 'SITE_CHAT') return;
     if (!d || !d.text) return;
     for (const sess of _siteSessions.values()) {
       if (!sess || !sess.entry) continue;
       const entry = sess.entry;
+      // Track the highest createdAt so resync knows where to pick up.
+      if (d.createdAt != null && (!entry.highestSeenCreatedAt || d.createdAt > entry.highestSeenCreatedAt)) {
+        entry.highestSeenCreatedAt = d.createdAt;
+      }
       // De-dupe: the textwatcher pre-pushes the line into the feed before
       // sending; the server echo that comes back should mark that row as
       // confirmed rather than append a duplicate. We match by text +
@@ -533,6 +545,48 @@ function _wireSiteSocketFanout() {
     }
   });
 }
+
+// Backfill messages missed while the WS was disconnected.  Fetches up
+// to 25 messages with createdAt < highestSeenCreatedAt and prepends
+// any that are not already in the feed (deduped by server id).
+async function _resyncSiteFeed(entry) {
+  if (!entry) return;
+  const before = entry.highestSeenCreatedAt;
+  if (!before) return;
+  try {
+    const res = await getSiteChat(25, before);
+    if (!res || !Array.isArray(res.messages)) return;
+    // Server returns newest-first; we store oldest-first. Reverse so
+    // we can prepend in chronological order.
+    const fetched = res.messages.slice().reverse();
+    const existingIds = new Set(entry.messages.map((m) => m.id).filter(Boolean));
+    const newMsgs = [];
+    for (const m of fetched) {
+      if (m.id && existingIds.has(m.id)) continue;
+      if (m.createdAt && m.createdAt >= before) continue;
+      newMsgs.push(m);
+    }
+    if (newMsgs.length === 0) return;
+    entry.messages.unshift(...newMsgs);
+    if (entry.messages.length > 50) entry.messages.splice(0, entry.messages.length - 50);
+    if (newMsgs[0]?.createdAt != null) {
+      entry.highestSeenCreatedAt = Math.max(entry.highestSeenCreatedAt || 0, newMsgs[0].createdAt);
+    }
+    _refreshFeed(entry.interaction || { editReply: async () => {} }, entry, 'site');
+  } catch (err) {
+    // Best-effort; don't crash on resync failure.
+  }
+}
+
+// 5-minute background resync for every active site feed.  Picks up
+// messages missed if the WS dropped or if a site-side post arrived
+// during a brief disconnect window.  unref() so it doesn't keep the
+// process alive on shutdown.
+setInterval(() => {
+  for (const sess of _siteSessions.values()) {
+    if (sess?.entry) _resyncSiteFeed(sess.entry);
+  }
+}, 5 * 60 * 1000).unref?.();
 
 
 
@@ -664,6 +718,11 @@ const _chatCmd = {
       sc
         .setName('leave')
         .setDescription('Stop forwarding regular messages to site chat here.'),
+    )
+    .addSubcommand((sc) =>
+      sc
+        .setName('snapshot')
+        .setDescription('Export the last 100 site-chat messages as a markdown file.'),
     ),
   async execute(interaction) {
     const sub = interaction.options.getSubcommand();
@@ -675,6 +734,37 @@ const _chatCmd = {
         return interaction.reply({ content: 'Stopped the live site-chat feed in this channel. Regular messages are no longer forwarded.', ephemeral: true });
       }
       return interaction.reply({ content: 'No active site-chat feed in this channel.', ephemeral: true });
+    }
+
+    if (sub === 'snapshot') {
+      await interaction.deferReply({ ephemeral: true });
+      try {
+        const res = await getSiteChat(100);
+        const msgs = (res && Array.isArray(res.messages)) ? res.messages : [];
+        if (msgs.length === 0) {
+          return interaction.editReply({ content: 'No site-chat messages to snapshot.' });
+        }
+        // Format as markdown, newest-first (as the server returns them).
+        const lines = msgs.map((m) => {
+          const ts = m.createdAt ? new Date(m.createdAt).toISOString() : '?';
+          const who = m.displayName || m.handle || 'Guest';
+          return `- **${who}** (${ts}): ${m.text}`;
+        });
+        const md = `# PeakSense Site Chat Snapshot\n\nGenerated ${new Date().toISOString()}\n${msgs.length} messages\n\n---\n\n${lines.join('\n')}\n`;
+        const buffer = Buffer.from(md, 'utf-8');
+        const attachment = new AttachmentBuilder(buffer, { name: 'site-chat-snapshot.md' });
+        await interaction.editReply({
+          content: `Snapshot with ${msgs.length} messages attached.`,
+          files: [attachment],
+        });
+        // Also post the file in the channel for everyone.
+        if (interaction.channel) {
+          await interaction.channel.send({ files: [new AttachmentBuilder(buffer, { name: 'site-chat-snapshot.md' })] }).catch(() => {});
+        }
+      } catch (err) {
+        return interaction.editReply({ content: 'Failed to generate snapshot: ' + (err?.message || 'unknown error') });
+      }
+      return;
     }
 
     // sub === 'join'
@@ -698,6 +788,7 @@ const _chatCmd = {
       authorId: interaction.user?.id || null,
       authorName: guestNameFromUser(interaction.user),
       messages,
+      highestSeenCreatedAt: messages.length > 0 ? Math.max(...messages.map((m) => m.createdAt || 0)) : null,
       detach: null,
       interaction: { ...interaction, message: reply },
     };

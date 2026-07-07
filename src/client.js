@@ -38,9 +38,11 @@ export function apiPath(p) {
  * 'SITE_CHAT') so a single socket can carry site chat and any
  * joined room(s).
  */
-export async function getSiteChat(limit = 25) {
+export async function getSiteChat(limit = 25, before) {
   const n = Math.max(1, Math.min(200, Math.floor(Number(limit) || 25)));
-  return psFetch('/api/site-chat?limit=' + n).catch(() => null);
+  let path = '/api/site-chat?limit=' + n;
+  if (before != null) path += '&before=' + encodeURIComponent(before);
+  return psFetch(path).catch(() => null);
 }
 
 export async function postSiteChat(text, guestName) {
