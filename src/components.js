@@ -229,8 +229,8 @@ export function makeHelpEmbed() {
       { name: '/dabs', value: "List a user's public dabs", inline: true },
       { name: '/compare', value: 'Side-by-side stats duel', inline: true },
       { name: '/share', value: 'Get a profile or dab share URL', inline: true },
-      { name: '/chat', value: '`/chat join` opens the site-wide chat live feed; regular messages are forwarded until you `/chat leave`', inline: true },
-      { name: '/room', value: '`/room join code:XXX` opens a room feed; regular messages are forwarded until you `/room leave`', inline: true },
+      { name: '/chat', value: '`/chat join` live site-chat feed · `/chat snapshot` export last 100 · `/chat reply` to a message', inline: true },
+      { name: '/room', value: '`/room join code:XXX` live room feed · `/room reply` to a message', inline: true },
       { name: '/senselink', value: 'Invite link + this help panel', inline: true },
     )
     .setFooter({ text: 'SenseLink for PeakSense' });
