@@ -311,18 +311,26 @@ const _roomSessions = new Map(); // key = `${channelId}:${code}` -> { entry, mes
 // Detach every active live room-chat embed in a channel. When
 // code is provided, only that code is detached; otherwise every
 // room feed in the channel is detached (matches /room leave UX).
+// Gentle leave: removes the session pointer so the textwatcher stops
+// forwarding, but keeps the entry in _roomFeeds so the embed stays
+// and the user can page back through history.  Sets closed=true and
+// refreshes with a "stopped" footer.
 function _detachRoomFeedForChannel(channelId, code) {
   if (!channelId) return 0;
   let detached = 0;
   for (const [messageId, entry] of _roomFeeds) {
     if (entry.channelId !== channelId) continue;
     if (code && entry.code !== code) continue;
-    try { entry.detach && entry.detach(); } catch { /* ignore */ }
-    _roomFeeds.delete(messageId);
+    // Remove from sessions so textwatcher stops forwarding.
     if (entry.code) {
       const key = channelId + ":" + entry.code;
       const sess = _roomSessions.get(key);
       if (sess && sess.messageId === messageId) _roomSessions.delete(key);
+    }
+    // Mark as closed but keep the entry so the embed persists.
+    if (!entry.closed) {
+      entry.closed = true;
+      _refreshFeed(entry.interaction || { editReply: async () => {} }, entry, 'room', entry.code);
     }
     detached++;
   }
@@ -346,10 +354,11 @@ function guestNameFromUser(user) {
 }
 
 // Detach every active live site-chat embed in a channel (or just the
-// caller authorOnly session). Removes the _siteFeeds entry,
-// unsubscribes the socket listener, and clears the per-channel
-// _siteSessions pointer. Returns the number of feeds detached so
-// /chat leave can report what happened.
+// caller authorOnly session). Gentle leave: removes the _siteSessions
+// pointer so the textwatcher stops forwarding, but keeps the entry in
+// _siteFeeds so the embed stays and the user can page back through
+// history.  Sets closed=true and refreshes with a "stopped" footer.
+// Returns the number of feeds detached.
 function _detachSiteFeedForChannel(channelId, _authorId, opts) {
   const authorOnly = !!(opts && opts.authorOnly);
   if (!channelId) return 0;
@@ -357,10 +366,14 @@ function _detachSiteFeedForChannel(channelId, _authorId, opts) {
   for (const [messageId, entry] of _siteFeeds) {
     if (entry.channelId !== channelId) continue;
     if (authorOnly && entry.authorId && entry.authorId !== _authorId) continue;
-    try { entry.detach && entry.detach(); } catch { /* ignore */ }
-    _siteFeeds.delete(messageId);
+    // Remove from sessions so textwatcher stops forwarding.
     const sess = _siteSessions.get(channelId);
     if (sess && sess.messageId === messageId) _siteSessions.delete(channelId);
+    // Mark as closed but keep the entry so the embed persists.
+    if (!entry.closed) {
+      entry.closed = true;
+      _refreshFeed(entry.interaction || { editReply: async () => {} }, entry, 'site');
+    }
     detached++;
   }
   return detached;
@@ -655,6 +668,16 @@ function _wireRoomSocketFanout(code) {
   _roomFanoutByCode.add(code);
   const sock = getRoomSocket(code, { nickname: 'SenseLink' });
   sock.on((t, d) => {
+    if (t === 'presence') {
+      // Update presence for every active room session with this code.
+      for (const [key, sess] of _roomSessions) {
+        if (!key.endsWith(':' + code)) continue;
+        if (!sess || !sess.entry) continue;
+        sess.entry.presence = d;
+        _refreshFeed(sess.entry.interaction || { editReply: async () => {} }, sess.entry, 'room', code);
+      }
+      return;
+    }
     if (t !== 'CHAT') return;
     if (!d || !d.text) return;
     for (const [key, sess] of _roomSessions) {
@@ -748,6 +771,8 @@ async function _doRefresh(interaction, entry, kind, code) {
     totalPages,
     profiles,
     author,
+    presence: kind === 'room' ? (entry.presence || null) : null,
+    footerText: entry.closed ? 'Live feed stopped · /chat join to resume' : null,
   });
   await interaction.editReply({
     embeds: [embed],

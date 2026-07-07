@@ -256,7 +256,7 @@ export const CHAT_PAGE_SIZE = 10;
  * 1-minute windows.  `profiles` is an optional Map<handle, {profile}>.
  * `author` is an optional resolved profile for the embed setAuthor.
  */
-export function chatEmbed({ kind, code = null, messages = [], title = null, pageIndex = 0, totalPages = 1, profiles = null, author = null, footerText = null }) {
+export function chatEmbed({ kind, code = null, messages = [], title = null, pageIndex = 0, totalPages = 1, profiles = null, author = null, footerText = null, presence = null }) {
   const isSite = kind === 'site';
   const list = Array.isArray(messages) ? messages : [];
   totalPages = Math.max(1, totalPages);
@@ -310,6 +310,14 @@ export function chatEmbed({ kind, code = null, messages = [], title = null, page
     if (groupLines.length > 0) {
       embed.addFields({ name: 'Earlier messages', value: groupLines.join('\n').slice(0, 1024) });
     }
+  }
+
+  // Room presence fields: show player and spectator counts.
+  if (!isSite && presence && (presence.players != null || presence.spectators != null)) {
+    embed.addFields(
+      { name: 'Players', value: String(presence.players ?? 0), inline: true },
+      { name: 'Spectators', value: String(presence.spectators ?? 0), inline: true },
+    );
   }
 
   const footerParts = ['SenseLink', isSite ? '/chat' : '/room'];

@@ -29,6 +29,17 @@ export class PeakSenseSocket extends EventTarget {
   get room() { return this._room; }
   get connected() { return !!(this._ws && this._ws.readyState === WebSocket.OPEN); }
 
+  /** Return a snapshot of { players, spectators } counts for the room. */
+  _presence() {
+    if (!this._room) return { players: 0, spectators: 0 };
+    const participants = this._room.participants || [];
+    const peers = this._room.peers || [];
+    // participants are competitors; spectators are peers minus participants.
+    const players = participants.length;
+    const spectators = Math.max(0, peers.length - players);
+    return { players, spectators };
+  }
+
   on(handler) {
     this._handlers.add(handler);
     return () => this._handlers.delete(handler);
@@ -68,8 +79,19 @@ export class PeakSenseSocket extends EventTarget {
       const d = frame.d || {};
       if (t === "JOINED") {
         this._room = { code: d.room, name: d.roomName, ownerId: d.ownerId, peers: d.peers || [], participants: d.participants || [] };
+        this._emit("presence", this._presence());
       } else if (t === "JOIN_REJECTED" || t === "ROOM_CLOSED") {
         this._room = null;
+      } else if (t === "PEER_JOINED" || t === "PEER_LEFT") {
+        // Update room roster from the frame data if provided; otherwise
+        // best-effort add/remove by nickname/id.
+        if (this._room) {
+          if (d.peers) this._room.peers = d.peers;
+          else if (t === "PEER_JOINED" && d.peer) this._room.peers.push(d.peer);
+          else if (t === "PEER_LEFT" && d.peerId) this._room.peers = this._room.peers.filter((p) => p.id !== d.peerId);
+          if (d.participants) this._room.participants = d.participants;
+          this._emit("presence", this._presence());
+        }
       }
       if (t === "PING") {
         this._sendRaw({ t: "PONG", d: { ts: Date.now() } });
