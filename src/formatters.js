@@ -240,9 +240,10 @@ function formatChatLine(msg, maxLen = 80, profiles = null) {
     : `**${whoSafe}**`;
 
   const warn = msg._failed ? '⚠ ' : '';
+  const replyChip = msg.replyTo ? '↪ reply · ' : '';
   const ts = relativeTime(msg._failed ? undefined : msg.createdAt);
   const truncated = text.length > maxLen ? text.slice(0, maxLen - 1) + '…' : text;
-  return `${warn}${author} — ${truncated}${ts}`;
+  return `${warn}${author} — ${replyChip}${truncated}${ts}`;
 }
 
 export const CHAT_PAGE_SIZE = 10;

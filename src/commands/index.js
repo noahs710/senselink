@@ -810,6 +810,23 @@ const _chatCmd = {
       sc
         .setName('snapshot')
         .setDescription('Export the last 100 site-chat messages as a markdown file.'),
+    )
+    .addSubcommand((sc) =>
+      sc
+        .setName('reply')
+        .setDescription('Reply to a specific message in the site-chat feed.')
+        .addStringOption((o) =>
+          o
+            .setName('id')
+            .setDescription('The message id to reply to (from the embed or snapshot)')
+            .setRequired(true),
+        )
+        .addStringOption((o) =>
+          o
+            .setName('text')
+            .setDescription('Your reply text')
+            .setRequired(true),
+        ),
     ),
   async execute(interaction) {
     const sub = interaction.options.getSubcommand();
@@ -852,6 +869,37 @@ const _chatCmd = {
         return interaction.editReply({ content: 'Failed to generate snapshot: ' + (err?.message || 'unknown error') });
       }
       return;
+    }
+
+    if (sub === 'reply') {
+      const replyId = interaction.options.getString('id');
+      const replyText = trimChat(interaction.options.getString('text') || '', 280);
+      if (!replyId || !replyText) {
+        return interaction.reply({ content: 'Usage: /chat reply <id> <text>', ephemeral: true });
+      }
+      const sess = _siteSessions.get(channelId);
+      if (!sess?.entry) {
+        return interaction.reply({ content: 'No active site-chat feed in this channel. Use /chat join first.', ephemeral: true });
+      }
+      const displayName = guestNameFromUser(interaction.user);
+      const token = randomUUID();
+      sess.entry.messages.push({ text: replyText, displayName, _local: true, _serverEchoed: false, _token: token, replyTo: replyId, createdAt: Date.now() });
+      if (sess.entry.messages.length > 50) sess.entry.messages.splice(0, sess.entry.messages.length - 50);
+      _refreshFeed(sess.entry.interaction || interaction, sess.entry, 'site');
+      (async () => {
+        try {
+          const sock = getSiteSocket();
+          const ok = await sock.sendSiteChat(replyText, displayName);
+          if (!ok) {
+            const m = sess.entry.messages.find((x) => x._token === token);
+            if (m) m._failed = true;
+            _refreshFeed(sess.entry.interaction || interaction, sess.entry, 'site');
+          }
+        } catch (err) {
+          console.error('chat reply send failed', err);
+        }
+      })();
+      return interaction.reply({ content: 'Reply sent to site chat.', ephemeral: true });
     }
 
     // sub === 'join'
@@ -937,6 +985,23 @@ const _roomCmd = {
       sc
         .setName('leave')
         .setDescription('Stop forwarding regular messages to rooms here.'),
+    )
+    .addSubcommand((sc) =>
+      sc
+        .setName('reply')
+        .setDescription('Reply to a specific message in the room feed.')
+        .addStringOption((o) =>
+          o
+            .setName('id')
+            .setDescription('The message id to reply to')
+            .setRequired(true),
+        )
+        .addStringOption((o) =>
+          o
+            .setName('text')
+            .setDescription('Your reply text')
+            .setRequired(true),
+        ),
     ),
   async execute(interaction) {
     const sub = interaction.options.getSubcommand();
@@ -950,6 +1015,44 @@ const _roomCmd = {
           : 'No active room feeds in this channel.',
         ephemeral: true,
       });
+    }
+
+    if (sub === 'reply') {
+      const replyId = interaction.options.getString('id');
+      const replyText = trimChat(interaction.options.getString('text') || '', 200);
+      if (!replyId || !replyText) {
+        return interaction.reply({ content: 'Usage: /room reply <id> <text>', ephemeral: true });
+      }
+      // Find the active room session in this channel.
+      let sess = null;
+      let roomCode = null;
+      for (const [key, s] of _roomSessions) {
+        if (key.startsWith(channelId + ':') && s?.entry) { sess = s; roomCode = s.code; break; }
+      }
+      if (!sess) {
+        return interaction.reply({ content: 'No active room feed in this channel. Use /room join first.', ephemeral: true });
+      }
+      const nickname = trimChat(sess.entry.authorName || guestNameFromUser(interaction.user), 24) || 'SenseLink';
+      const token = randomUUID();
+      sess.entry.messages.push({ text: replyText, nickname, _local: true, _serverEchoed: false, _token: token, replyTo: replyId });
+      if (sess.entry.messages.length > 50) sess.entry.messages.splice(0, sess.entry.messages.length - 50);
+      _refreshFeed(sess.entry.interaction || interaction, sess.entry, 'room', roomCode);
+      (async () => {
+        try {
+          const sock = sess.entry.socket || getRoomSocket(roomCode, { nickname });
+          sess.entry.socket = sock;
+          if (!sock.connected || !sock.room || sock.room.code !== roomCode) sock.joinRoom(roomCode, { nickname, role: 'spectator' });
+          const ok = await sock.sendRoomChat(replyText);
+          if (!ok) {
+            const m = sess.entry.messages.find((x) => x._token === token);
+            if (m) m._failed = true;
+            _refreshFeed(sess.entry.interaction || interaction, sess.entry, 'room', roomCode);
+          }
+        } catch (err) {
+          console.error('room reply send failed', err);
+        }
+      })();
+      return interaction.reply({ content: 'Reply sent to room.', ephemeral: true });
     }
 
     // sub === 'join'
