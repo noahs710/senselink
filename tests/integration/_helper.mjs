@@ -33,7 +33,14 @@ export function makeCommandHarness({ channelId = 'c1' } = {}) {
     function getMain() {
       if (!mainId) {
         mainId = newId();
-        messages.set(mainId, { id: mainId, edits: [], replies: [], followUps: [] });
+        const m = { id: mainId, edits: [], replies: [], followUps: [] };
+        // In real discord.js, Message.edit() updates the same message
+        // in-place.  The bot uses msg.edit() instead of interaction.editReply()
+        // for ongoing embed updates because interaction tokens expire
+        // after 15 minutes.  The mock mirrors this: edit() pushes to the
+        // same .edits array as editReply().
+        m.edit = async (payload) => { m.edits.push(payload); return m; };
+        messages.set(mainId, m);
       }
       return messages.get(mainId);
     }

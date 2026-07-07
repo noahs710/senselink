@@ -818,10 +818,21 @@ async function _doRefresh(interaction, entry, kind, code) {
     footerText: entry.closed ? 'Live feed stopped · /chat join to resume' : null,
     typing: entry.typing || null,
   });
-  await interaction.editReply({
-    embeds: [embed],
-    components: kind === 'site' ? _siteFeedRows(entry.messageId, pageIndex, totalPages) : _roomFeedRows(entry.messageId, code, pageIndex, totalPages),
-  });
+  // Use message.edit() instead of interaction.editReply() for ongoing
+  // updates.  interaction tokens expire after 15 minutes, but a
+  // Message object can be edited indefinitely (rate-limited to 5/5s).
+  const msg = entry.message || entry.interaction?.message;
+  if (msg && typeof msg.edit === 'function') {
+    await msg.edit({
+      embeds: [embed],
+      components: kind === 'site' ? _siteFeedRows(entry.messageId, pageIndex, totalPages) : _roomFeedRows(entry.messageId, code, pageIndex, totalPages),
+    });
+  } else {
+    await interaction.editReply({
+      embeds: [embed],
+      components: kind === 'site' ? _siteFeedRows(entry.messageId, pageIndex, totalPages) : _roomFeedRows(entry.messageId, code, pageIndex, totalPages),
+    });
+  }
 }
 
 
@@ -969,6 +980,7 @@ const _chatCmd = {
       messages,
       highestSeenCreatedAt: messages.length > 0 ? Math.max(...messages.map((m) => m.createdAt || 0)) : null,
       detach: null,
+      message: reply,
       interaction: { ...interaction, message: reply },
     };
     _siteFeeds.set(reply.id, entry);
@@ -1144,6 +1156,7 @@ const _roomCmd = {
       channelId,
       authorId: interaction.user?.id || null,
       authorName: nickname,
+      message: reply,
       interaction: { ...interaction, message: reply },
     };
     _roomFeeds.set(reply.id, entry);

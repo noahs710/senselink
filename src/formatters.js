@@ -234,9 +234,13 @@ function formatChatLine(msg, maxLen = 80, profiles = null) {
   const text = String(msg.text ?? '').replace(/\s+/g, ' ').trim();
   if (!text) return '';
 
-  // Clickable profile link for site users, plain bold for guests.
-  const author = profile?.profileUrl
-    ? `[${whoSafe}](${profile.profileUrl})`
+  // Clickable profile link for any message with a handle — even if
+  // the full profile hasn't resolved yet, we can construct the URL
+  // from the handle.  Guests (no handle) render as plain bold.
+  const baseUrl = (process.env.PEAKSENSE_API_BASE || 'http://127.0.0.1:8081').replace(/\/$/, '');
+  const profileUrl = profile?.profileUrl || (handle ? `${baseUrl}/u/${encodeURIComponent(handle)}` : null);
+  const author = profileUrl
+    ? `[${whoSafe}](${profileUrl})`
     : `**${whoSafe}**`;
 
   const warn = msg._failed ? '⚠ ' : '';

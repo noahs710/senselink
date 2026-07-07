@@ -31,6 +31,18 @@ test('chatEmbed: site user with handle renders as clickable profile link', async
     'expected relative time suffix');
 });
 
+test('chatEmbed: handle without resolved profile still gets clickable link', async () => {
+  const messages = [
+    { text: 'hi from site', handle: 'bob', displayName: 'Bob', createdAt: Date.now() },
+  ];
+  // No profiles map — simulate profile not yet resolved
+  const embed = chatEmbed({ kind: 'site', messages });
+  const desc = embed.data.description;
+  // Should still have a clickable link constructed from the handle
+  assert.ok(desc.includes('[Bob]('), 'expected clickable link from handle alone, got: ' + desc);
+  assert.ok(desc.includes('/u/bob'), 'expected /u/bob URL, got: ' + desc);
+});
+
 test('chatEmbed: failed line gets warning glyph', async () => {
   const messages = [
     { text: 'oops failed', displayName: 'Bob', _failed: true, createdAt: Date.now() },
