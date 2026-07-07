@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { SlashCommandBuilder, EmbedBuilder, AttachmentBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import {
   getDab,
@@ -393,7 +394,10 @@ function _forwardChannelMessageToLiveFeeds(message) {
     const text = trimChat(raw, 280);
     if (text) {
       const displayName = guestNameFromUser(message.author);
-      site.entry.messages.push({ text, displayName, _local: true, _serverEchoed: false, createdAt: now });
+      const seq = (site.entry._localSeq ?? 0) + 1;
+      site.entry._localSeq = seq;
+      const token = randomUUID();
+      site.entry.messages.push({ text, displayName, _local: true, _serverEchoed: false, _localSeq: seq, _token: token, createdAt: now });
       if (site.entry.messages.length > 50) site.entry.messages.splice(0, site.entry.messages.length - 50);
       _refreshFeed(site.entry.interaction || message, site.entry, 'site');
       (async () => {
@@ -401,8 +405,8 @@ function _forwardChannelMessageToLiveFeeds(message) {
           const sock = getSiteSocket();
           const ok = await sock.sendSiteChat(text, displayName);
           if (!ok) {
-            const last = site.entry.messages[site.entry.messages.length - 1];
-            if (last && last.text === text && last.displayName === displayName) last._failed = true;
+            const m = site.entry.messages.find((x) => x._token === token);
+            if (m) m._failed = true;
             _refreshFeed(site.entry.interaction || message, site.entry, 'site');
           }
         } catch (err) {
@@ -420,7 +424,10 @@ function _forwardChannelMessageToLiveFeeds(message) {
     const text = trimChat(raw, 200);
     if (!text) continue;
     const nickname = trimChat(sess.entry.authorName || guestNameFromUser(message.author), 24) || 'SenseLink';
-    sess.entry.messages.push({ text, nickname, _local: true, _serverEchoed: false });
+    const seq = (sess.entry._localSeq ?? 0) + 1;
+    sess.entry._localSeq = seq;
+    const token = randomUUID();
+    sess.entry.messages.push({ text, nickname, _local: true, _serverEchoed: false, _localSeq: seq, _token: token });
     if (sess.entry.messages.length > 50) sess.entry.messages.splice(0, sess.entry.messages.length - 50);
     _refreshFeed(sess.entry.interaction || message, sess.entry, 'room', sess.entry.code);
     const sock = sess.entry.socket || (sess.entry.code ? getRoomSocket(sess.entry.code, { nickname }) : null);
@@ -431,8 +438,8 @@ function _forwardChannelMessageToLiveFeeds(message) {
           if (!sock.connected || !sock.room || sock.room.code !== sess.entry.code) sock.joinRoom(sess.entry.code, { nickname, role: 'spectator' });
           const ok = await sock.sendRoomChat(text);
           if (!ok) {
-            const last = sess.entry.messages[sess.entry.messages.length - 1];
-            if (last && last.text === text && last.nickname === nickname) last._failed = true;
+            const m = sess.entry.messages.find((x) => x._token === token);
+            if (m) m._failed = true;
             _refreshFeed(sess.entry.interaction || message, sess.entry, 'room', sess.entry.code);
           }
         } catch (err) {
@@ -503,10 +510,19 @@ function _wireSiteSocketFanout() {
       const entry = sess.entry;
       // De-dupe: the textwatcher pre-pushes the line into the feed before
       // sending; the server echo that comes back should mark that row as
-      // confirmed rather than append a duplicate.
-      const last = entry.messages[entry.messages.length - 1];
-      if (last && last.text === d.text && (last.displayName || '') === (d.displayName || '') && !last._serverEchoed) {
-        last._serverEchoed = true;
+      // confirmed rather than append a duplicate. We match by text +
+      // displayName against the oldest un-echoed local line (FIFO), so
+      // two identical messages from the same user each get matched to
+      // their own echo instead of collapsing into one.
+      const match = entry.messages.find((m) =>
+        m._local && !m._serverEchoed && m.text === d.text &&
+        (m.displayName || '') === (d.displayName || ''),
+      );
+      if (match) {
+        match._serverEchoed = true;
+        if (d.id != null) match.id = d.id;
+        if (d.createdAt != null) match.createdAt = d.createdAt;
+        if (d.handle != null) match.handle = d.handle;
         _refreshFeed(entry.interaction || { editReply: async () => {} }, entry, 'site');
         continue;
       }
@@ -537,9 +553,13 @@ function _wireRoomSocketFanout(code) {
       if (!key.endsWith(':' + code)) continue;
       if (!sess || !sess.entry) continue;
       const entry = sess.entry;
-      const last = entry.messages[entry.messages.length - 1];
-      if (last && last.text === d.text && (last.nickname || '') === (d.nickname || '') && !last._serverEchoed) {
-        last._serverEchoed = true;
+      // De-dupe: same FIFO match-by-text + nickname approach as site.
+      const match = entry.messages.find((m) =>
+        m._local && !m._serverEchoed && m.text === d.text &&
+        (m.nickname || '') === (d.nickname || ''),
+      );
+      if (match) {
+        match._serverEchoed = true;
         _refreshFeed(entry.interaction || { editReply: async () => {} }, entry, 'room', code);
         continue;
       }

@@ -9,7 +9,9 @@
     "dev": "node --watch src/index.js",
     "register": "node src/deploy-commands.js",
     "lint": "eslint src",
-    "test": "node --test src/**/*.test.js"
+    "test": "node --test src/**/*.test.js tests/**/*.test.mjs",
+    "test:unit": "node --test src/**/*.test.js",
+    "test:integration": "node --test tests/**/*.test.mjs"
   },
   "engines": {
     "node": ">=18.0.0"
