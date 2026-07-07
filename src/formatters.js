@@ -92,8 +92,40 @@ export function formatAchievementsFull(achievements = [], catalog = null) {
   return rows.join('\n');
 }
 
-export function profileEmbed(user, stats, achievements = [], catalog = null, imageUrl = null) {
+/**
+ * Build a text-based XP progress bar.
+ * Returns a string like `[████████░░░░░░░░] 400/500 XP` (10 blocks wide).
+ */
+function xpBar(xp, xpNeeded) {
+  const width = 10;
+  const filled = xpNeeded > 0 ? Math.round((xp / xpNeeded) * width) : 0;
+  const bar = '█'.repeat(Math.min(filled, width)) + '░'.repeat(Math.max(width - filled, 0));
+  return `[${bar}] ${xp}/${xpNeeded} XP`;
+}
+
+export function profileEmbed(user, stats, achievements = [], catalog = null, imageUrl = null, followStats = null) {
   const fields = [];
+
+  // Progression: level, XP bar, title, streak
+  const level = user.level || stats?.level || 1;
+  const xp = user.xp ?? stats?.xp ?? 0;
+  const xpNeeded = stats?.xpNeeded ?? (100 * level);
+  const title = stats?.title || '';
+  const streak = user.streak ?? stats?.streak ?? 0;
+  const bestStreak = user.bestStreak ?? stats?.bestStreak ?? 0;
+  const totalXp = user.totalXp ?? stats?.totalXp ?? 0;
+
+  if (title) {
+    fields.push({ name: 'Level', value: `${level} · ${title}`, inline: true });
+  } else {
+    fields.push({ name: 'Level', value: String(level), inline: true });
+  }
+  fields.push({ name: 'XP', value: xpBar(xp, xpNeeded), inline: true });
+  if (streak > 0 || bestStreak > 0) {
+    fields.push({ name: 'Streak', value: `🔥 ${streak} (best: ${bestStreak})`, inline: true });
+  }
+
+  // Core stats
   if (stats) {
     fields.push(
       { name: 'Dabs', value: String(stats.totalDabs ?? 0), inline: true },
@@ -103,6 +135,9 @@ export function profileEmbed(user, stats, achievements = [], catalog = null, ima
     if (stats.averageScore != null) {
       fields.push({ name: 'Average', value: String(stats.averageScore), inline: true });
     }
+    if (stats.dabsPerDay != null && stats.dabsPerDay > 0) {
+      fields.push({ name: 'Dabs/day', value: String(stats.dabsPerDay), inline: true });
+    }
     if (stats.rating) {
       fields.push({ name: 'Rating', value: String(Math.round(stats.rating)), inline: true });
     }
@@ -111,12 +146,26 @@ export function profileEmbed(user, stats, achievements = [], catalog = null, ima
     }
   }
 
+  // Follow stats
+  if (followStats) {
+    fields.push(
+      { name: 'Followers', value: String(followStats.followers ?? 0), inline: true },
+      { name: 'Following', value: String(followStats.following ?? 0), inline: true },
+    );
+  }
+
   fields.push({ name: 'Recent achievements', value: formatAchievementsList(achievements, catalog) });
+
+  // Build a rich description with bio + total XP
+  const descParts = [];
+  if (user.bio) descParts.push(user.bio);
+  if (totalXp > 0) descParts.push(`Lifetime XP: **${totalXp}**`);
+  const description = descParts.length > 0 ? descParts.join('\n') : 'PeakSense profile';
 
   const embed = new EmbedBuilder()
     .setTitle(`${user.displayName} (@${user.handle})`)
     .setURL(profileUrl(user.handle))
-    .setDescription(user.bio || 'PeakSense profile')
+    .setDescription(description.slice(0, 4000))
     .setColor(0x22c55e)
     .addFields(fields)
     .setFooter({ text: 'PeakSense • /profile' })
@@ -131,8 +180,9 @@ export function dabEmbed(dab, likes = null, imageUrl = null) {
   const u = dab.user;
   const dur = Math.round(dab.durationS ?? 0);
   const temp = Math.round(dab.tempF ?? 0);
+  const perfect = dab.isPerfectDraw ? ' ⭐' : '';
   const fields = [
-    { name: 'Score', value: `${dab.score}/100 (${dab.grade})`, inline: true },
+    { name: `Score${perfect}`, value: `${dab.score}/100 (${dab.grade})`, inline: true },
     { name: 'Temp', value: `${temp}°F`, inline: true },
     { name: 'Duration', value: `${dur}s`, inline: true },
   ];
@@ -141,9 +191,9 @@ export function dabEmbed(dab, likes = null, imageUrl = null) {
   }
 
   const embed = new EmbedBuilder()
-    .setTitle(u ? `${u.displayName} scored ${dab.score} (${dab.grade})` : `Dab ${String(dab.id).slice(0, 8)}`)
+    .setTitle(u ? `${u.displayName} scored ${dab.score} (${dab.grade})${perfect}` : `Dab ${String(dab.id).slice(0, 8)}`)
     .setURL(dabUrl(dab.id))
-    .setDescription(`${u ? `@${u.handle}` : 'Someone'}'s dab — ${temp}°F, ${dur}s.`)
+    .setDescription(`${u ? `[@${u.handle}](${profileUrl(u.handle)})` : 'Someone'}'s dab — ${temp}°F, ${dur}s.${perfect ? ' **Perfect draw!**' : ''}`)
     .setColor(gradeColor(dab.grade))
     .addFields(fields)
     .setFooter({ text: `PeakSense • ${new Date(dab.createdAt).toLocaleString()}` })
@@ -154,19 +204,75 @@ export function dabEmbed(dab, likes = null, imageUrl = null) {
   return embed;
 }
 
-export function leaderboardEmbed(entries, period, pageIndex = 0) {
+export function leaderboardEmbed(entries, period, pageIndex = 0, youInfo = null) {
   const lines = (entries ?? []).map((e, i) => {
     const rank = e?.rank ?? i + 1;
     const medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `${rank}.`;
     const delta = e.periodDelta != null ? ` *(+${Math.round(e.periodDelta)})` : '';
-    return `${medal} **@${e.user.handle}** — rating ${Math.round(e.rating)} • best ${e.bestScore} • ${e.publicDabs} public${delta}`;
+    const level = e.user?.level ? ` L${e.user.level}` : '';
+    const title = e.user?.level ? ` ${titleForLevelShort(e.user.level)}` : '';
+    return `${medal} **@${e.user.handle}**${level ? ` (${level}${title})` : ''} — rating ${Math.round(e.rating)} • best ${e.bestScore} • ${e.publicDabs} public${delta}`;
   });
 
+  const footerParts = [`Page ${pageIndex + 1}`, 'SenseLink', '/leaderboard'];
+  if (youInfo?.rank) footerParts.push(`You: #${youInfo.rank}`);
   return new EmbedBuilder()
     .setTitle(`🏆 PeakSense leaderboard — ${periodLabel(period)}`)
     .setDescription(lines.join('\n') || 'No rankings yet.')
     .setColor(0x22c55e)
-    .setFooter({ text: `Page ${pageIndex + 1} • SenseLink • /leaderboard` })
+    .setFooter({ text: footerParts.join(' • ') })
+    .setTimestamp();
+}
+
+/** Short title for leaderboard compactness */
+function titleForLevelShort(level) {
+  const titles = [
+    [100, 'Legend'], [90, 'Vapor'], [80, 'Cloud'], [70, 'Titan'],
+    [60, 'Maestro'], [50, 'Savant'], [40, 'Connoisseur'], [30, 'Pro'],
+    [25, 'Star'], [20, 'Chaser'], [15, 'Seeker'], [10, 'Enthusiast'],
+    [5, 'Apprentice'], [0, 'New'],
+  ];
+  for (const [min, t] of titles) if (level >= min) return t;
+  return '';
+}
+
+export function statsEmbed(user, stats, followStats = null) {
+  const level = user.level || stats?.level || 1;
+  const xp = user.xp ?? stats?.xp ?? 0;
+  const xpNeeded = stats?.xpNeeded ?? (100 * level);
+  const title = stats?.title || '';
+  const streak = user.streak ?? stats?.streak ?? 0;
+  const bestStreak = user.bestStreak ?? stats?.bestStreak ?? 0;
+  const totalXp = user.totalXp ?? stats?.totalXp ?? 0;
+
+  const fields = [
+    { name: 'Level', value: `${level}${title ? ' · ' + title : ''}`, inline: true },
+    { name: 'XP (this level)', value: `${xp} / ${xpNeeded}`, inline: true },
+    { name: 'Lifetime XP', value: String(totalXp), inline: true },
+    { name: 'Current Streak', value: `🔥 ${streak}`, inline: true },
+    { name: 'Best Streak', value: String(bestStreak), inline: true },
+    { name: 'Rating', value: String(Math.round(stats?.rating ?? user.rating ?? 0)), inline: true },
+    { name: 'Best Score', value: String(stats?.bestScore ?? user.bestScore ?? 0), inline: true },
+    { name: 'Average Score', value: stats?.averageScore != null ? String(stats.averageScore) : '—', inline: true },
+    { name: 'Total Dabs', value: String(stats?.totalDabs ?? user.totalDabs ?? 0), inline: true },
+    { name: 'Public Dabs', value: String(stats?.publicDabs ?? 0), inline: true },
+    { name: 'Dabs/Day', value: String(stats?.dabsPerDay ?? 0), inline: true },
+  ];
+
+  if (followStats) {
+    fields.push(
+      { name: 'Followers', value: String(followStats.followers ?? 0), inline: true },
+      { name: 'Following', value: String(followStats.following ?? 0), inline: true },
+    );
+  }
+
+  return new EmbedBuilder()
+    .setTitle(`📊 Stats — ${user.displayName} (@${user.handle})`)
+    .setURL(profileUrl(user.handle))
+    .setDescription(xpBar(xp, xpNeeded))
+    .setColor(0x22c55e)
+    .addFields(fields)
+    .setFooter({ text: 'PeakSense • /stats' })
     .setTimestamp();
 }
 
@@ -177,7 +283,9 @@ export function feedEmbed(items, period, pageIndex = 0) {
     const dab = d.dab ?? d;
     const temp = Math.round(dab.tempF ?? 0);
     const dur = Math.round(dab.durationS ?? 0);
-    return `• **@${u?.handle ?? 'unknown'}** scored **${dab.score}** (${dab.grade}) — ${temp}°F, ${dur}s — [view](${dabUrl(dab.id)})`;
+    const who = u?.handle ? `[@${u.displayName ?? u.handle}](${profileUrl(u.handle)})` : `**${u?.displayName ?? 'unknown'}**`;
+    const perfect = dab.isPerfectDraw ? ' ⭐' : '';
+    return `• ${who} scored **${dab.score}** (${dab.grade})${perfect} — ${temp}°F, ${dur}s — [view](${dabUrl(dab.id)})`;
   });
 
   return new EmbedBuilder()

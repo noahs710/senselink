@@ -13,6 +13,7 @@ import {
   getUserDabs,
   getUserStats,
   getAchievementsCatalog,
+  getFollowStats,
   normalizeHandle,
 } from './client.js';
 import { profileEmbed, profileUrl, formatAchievementsFull } from './formatters.js';
@@ -30,12 +31,13 @@ export async function handleComponent(interaction, _client) {
   if (action === 'profile') {
     await interaction.deferUpdate();
     const handle = normalizeHandle(rest[0]);
-    const [userRes, stats, achievements, catalog, dabsPage] = await Promise.all([
+    const [userRes, stats, achievements, catalog, dabsPage, followStats] = await Promise.all([
       getUser(handle),
       getUserStats(handle).catch(() => null),
       getUserAchievements(handle).catch(() => []),
       getAchievementsCatalog(),
       getUserDabs(handle, undefined, 50).catch(() => null),
+      getFollowStats(handle),
     ]);
     if (!userRes?.user) {
       return interaction.editReply({ content: `No user @${handle} found.`, embeds: [], components: [] });
@@ -47,6 +49,7 @@ export async function handleComponent(interaction, _client) {
       achievements?.achievements ?? [],
       catalog,
       trend ? 'attachment://score-trend.png' : null,
+      followStats,
     );
     const files = trend ? [new AttachmentBuilder(trend, { name: 'score-trend.png' })] : [];
     return interaction.editReply({
@@ -222,15 +225,17 @@ export function makeHelpEmbed() {
     )
     .setColor(0x22c55e)
     .addFields(
-      { name: '/profile', value: 'View a public profile + stats + achievements', inline: true },
-      { name: '/dab', value: 'Preview any dab by id', inline: true },
-      { name: '/leaderboard', value: 'Top ranked dabbers', inline: true },
-      { name: '/feed', value: 'Recent or trending public dabs', inline: true },
+      { name: '/profile', value: 'View a public profile + stats + achievements + XP bar + streak', inline: true },
+      { name: '/stats', value: 'Detailed level, XP, streak, title, dabs/day breakdown', inline: true },
+      { name: '/dab', value: 'Preview any dab by id (⭐ for perfect draws)', inline: true },
+      { name: '/leaderboard', value: 'Top ranked dabbers with level/title', inline: true },
+      { name: '/top', value: 'Quick top-N leaderboard (default 5)', inline: true },
+      { name: '/feed', value: 'Recent or trending public dabs (clickable profiles)', inline: true },
       { name: '/dabs', value: "List a user's public dabs", inline: true },
       { name: '/compare', value: 'Side-by-side stats duel', inline: true },
       { name: '/share', value: 'Get a profile or dab share URL', inline: true },
-      { name: '/chat', value: '`/chat join` live site-chat feed · `/chat snapshot` export last 100 · `/chat reply` to a message', inline: true },
-      { name: '/room', value: '`/room join code:XXX` live room feed · `/room reply` to a message', inline: true },
+      { name: '/chat', value: '`/chat join` live site-chat feed · `/chat snapshot` export · `/chat reply`', inline: true },
+      { name: '/room', value: '`/room join code:XXX` live room feed · `/room reply`', inline: true },
       { name: '/senselink', value: 'Invite link + this help panel', inline: true },
     )
     .setFooter({ text: 'SenseLink for PeakSense' });

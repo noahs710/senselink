@@ -229,3 +229,12 @@ export async function getFeed(limit = 10, cursor, period = 'recent') {
   recordHandles(items.map((e) => (e.user ?? e)?.handle));
   return res;
 }
+
+/**
+ * Fetch follow stats (followers/following counts) for a user.
+ * Public endpoint — no auth required.  Returns { following, followers,
+ * isFollowing } where isFollowing is null for anonymous callers.
+ */
+export async function getFollowStats(handle) {
+  return psFetch(`/api/users/${encodeURIComponent(handle)}/follow-stats`).catch(() => null);
+}

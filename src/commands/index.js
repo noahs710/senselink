@@ -15,6 +15,7 @@ import {
   trimChat,
   getSiteChat,
   resolveProfile,
+  getFollowStats,
 } from '../client.js';
 import {
   dabEmbed,
@@ -23,6 +24,7 @@ import {
   dabUrl,
   chatEmbed,
   CHAT_PAGE_SIZE,
+  statsEmbed,
 } from '../formatters.js';
 import {
   makeDabRow,
@@ -48,12 +50,13 @@ const commands = [
     async execute(interaction) {
       await interaction.deferReply();
       const handle = normalizeHandle(interaction.options.getString('handle'));
-      const [userRes, stats, achievements, catalog, dabsPage] = await Promise.all([
+      const [userRes, stats, achievements, catalog, dabsPage, followStats] = await Promise.all([
         getUser(handle),
         getUserStats(handle).catch(() => null),
         getUserAchievements(handle).catch(() => []),
         getAchievementsCatalog(),
         getUserDabs(handle, undefined, 50).catch(() => null),
+        getFollowStats(handle),
       ]);
       if (!userRes?.user) {
         return interaction.editReply({ content: `No PeakSense user named **@${handle}**.` });
@@ -65,6 +68,7 @@ const commands = [
         achievements?.achievements ?? [],
         catalog,
         trend ? 'attachment://score-trend.png' : null,
+        followStats,
       );
       const files = trend ? [new AttachmentBuilder(trend, { name: 'score-trend.png' })] : [];
       return interaction.editReply({ embeds: [embed], components: [makeProfileRow(handle)], files });
@@ -837,6 +841,70 @@ async function _doRefresh(interaction, entry, kind, code) {
 
 
 
+
+
+// /stats — detailed progression breakdown for a user.
+const _statsCmd = {
+  data: new SlashCommandBuilder()
+    .setName('stats')
+    .setDescription('Detailed stats, level, XP, and streak for a PeakSense user')
+    .addStringOption((o) =>
+      o
+        .setName('handle')
+        .setDescription('PeakSense handle or display name')
+        .setRequired(true)
+        .setAutocomplete(true),
+    ),
+  async execute(interaction) {
+    await interaction.deferReply();
+    const handle = normalizeHandle(interaction.options.getString('handle'));
+    const [userRes, stats, followStats] = await Promise.all([
+      getUser(handle),
+      getUserStats(handle).catch(() => null),
+      getFollowStats(handle),
+    ]);
+    if (!userRes?.user) {
+      return interaction.editReply({ content: `No PeakSense user named **@${handle}**.` });
+    }
+    const embed = statsEmbed(userRes.user, stats?.stats ?? null, followStats);
+    return interaction.editReply({ embeds: [embed], components: [makeProfileRow(handle)] });
+  },
+};
+commands.push(_statsCmd);
+
+
+// /top — shorthand leaderboard with a small count.
+const _topCmd = {
+  data: new SlashCommandBuilder()
+    .setName('top')
+    .setDescription('Quick top-N PeakSense leaderboard')
+    .addIntegerOption((o) =>
+      o
+        .setName('count')
+        .setDescription('How many entries to show (1-25)')
+        .setMinValue(1)
+        .setMaxValue(25)
+        .setRequired(false),
+    )
+    .addStringOption((o) =>
+      o
+        .setName('period')
+        .setDescription('Time window')
+        .setRequired(false)
+        .addChoices(
+          { name: 'All time', value: 'all' },
+          { name: 'This month', value: 'month' },
+          { name: 'This week', value: 'week' },
+        ),
+    ),
+  async execute(interaction) {
+    await interaction.deferReply();
+    const count = interaction.options.getInteger('count') ?? 5;
+    const period = interaction.options.getString('period') ?? 'all';
+    return startPaginator(interaction, 'leaderboard', { period, limit: count });
+  },
+};
+commands.push(_topCmd);
 
 
 const _chatCmd = {
