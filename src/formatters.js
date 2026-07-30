@@ -458,3 +458,183 @@ function gradeColor(grade) {
     default: return 0x94a3b8;
   }
 }
+
+// ---------------------------------------------------------------------------
+// Deep integration formatters (battles, digest, dotd, announcements)
+// ---------------------------------------------------------------------------
+
+/**
+ * Format the list of open public battle groups into an embed.
+ * `groups` is the array from GET /api/groups. Each item may have
+ * { id, name, memberCount, seshState, hostName }.
+ */
+export function battlesEmbed(groups) {
+  const list = Array.isArray(groups) ? groups : [];
+  const open = list.filter((g) => !g.seshState || g.seshState === 'open' || g.seshState === 'lobby');
+  const lines = (open.length > 0 ? open : list).slice(0, 25).map((g, i) => {
+    const name = g.name || `Room ${g.id || i + 1}`;
+    const members = g.memberCount != null ? g.memberCount : (g.members ? g.members.length : 0);
+    const state = g.seshState || 'open';
+    const stateIcon = state === 'in_progress' || state === 'active' ? '🔴' : '🟢';
+    const host = g.hostName ? ` · host: ${g.hostName}` : '';
+    return `${stateIcon} **${name}** — ${members} member${members === 1 ? '' : 's'} · ${state}${host}`;
+  });
+  return new EmbedBuilder()
+    .setTitle('⚔️ Open Battle Rooms')
+    .setDescription(lines.join('\n') || 'No public battle rooms open right now.')
+    .setColor(0xf97316)
+    .setFooter({ text: 'SenseLink • /battles' })
+    .setTimestamp();
+}
+
+/**
+ * Format the weekly community digest into an embed. `stats` is the
+ * response from GET /api/community/weekly, expected to have
+ * { totalDabs, averageScore, topDabber, mostActive, ... }.
+ */
+export function digestEmbed(stats) {
+  if (!stats) {
+    return new EmbedBuilder()
+      .setTitle('📊 Weekly Community Digest')
+      .setDescription('Community stats are not available right now. The /api/community/weekly endpoint may not be deployed yet.')
+      .setColor(0xef4444)
+      .setFooter({ text: 'SenseLink • /digest' })
+      .setTimestamp();
+  }
+  const fields = [
+    { name: 'Total Dabs', value: String(stats.totalDabs ?? 0), inline: true },
+    { name: 'Avg Score', value: stats.averageScore != null ? String(Math.round(stats.averageScore)) : '—', inline: true },
+  ];
+  if (stats.topDabber) {
+    const td = stats.topDabber;
+    const handle = td.handle || td;
+    const label = td.displayName ? `${td.displayName} (@${handle})` : `@${handle}`;
+    fields.push({ name: 'Top Dabber', value: label, inline: true });
+  }
+  if (stats.mostActive) {
+    const ma = stats.mostActive;
+    const handle = ma.handle || ma;
+    const label = ma.displayName ? `${ma.displayName} (@${handle})` : `@${handle}`;
+    fields.push({ name: 'Most Active', value: label, inline: true });
+  }
+  if (stats.newUsers != null) {
+    fields.push({ name: 'New Users', value: String(stats.newUsers), inline: true });
+  }
+  if (stats.totalPerfectDraws != null) {
+    fields.push({ name: 'Perfect Draws', value: String(stats.totalPerfectDraws), inline: true });
+  }
+  return new EmbedBuilder()
+    .setTitle('📊 Weekly Community Digest')
+    .setDescription('The latest community stats from PeakSense.')
+    .setColor(0x22c55e)
+    .addFields(fields)
+    .setFooter({ text: 'SenseLink • /digest' })
+    .setTimestamp();
+}
+
+/**
+ * Format the Dab of the Day into an embed. `data` is the response
+ * from GET /api/dabs/dotd, expected to have { dab, user, score, tempF,
+ * durationS, grade, createdAt, id }.
+ */
+export function dotdEmbed(data) {
+  if (!data || (!data.dab && !data.id)) {
+    return new EmbedBuilder()
+      .setTitle('🏆 Dab of the Day')
+      .setDescription('No Dab of the Day has been picked yet today. Check back later!')
+      .setColor(0x94a3b8)
+      .setFooter({ text: 'SenseLink • /dotd' })
+      .setTimestamp();
+  }
+  const dab = data.dab || data;
+  const u = dab.user || data.user;
+  const score = dab.score ?? data.score ?? 0;
+  const grade = dab.grade || data.grade || '';
+  const temp = Math.round(dab.tempF ?? data.tempF ?? 0);
+  const dur = Math.round(dab.durationS ?? data.durationS ?? 0);
+  const id = dab.id ?? data.id;
+  const perfect = (dab.isPerfectDraw ?? data.isPerfectDraw) ? ' ⭐ **Perfect draw!**' : '';
+  const fields = [
+    { name: `Score${perfect ? '' : ''}`, value: `${score}/100 (${grade})`, inline: true },
+    { name: 'Temp', value: `${temp}°F`, inline: true },
+    { name: 'Duration', value: `${dur}s`, inline: true },
+  ];
+  const embed = new EmbedBuilder()
+    .setTitle(`🏆 Dab of the Day${perfect}`)
+    .setURL(dabUrl(id))
+    .setDescription(
+      (u ? `[@${u.handle}](${profileUrl(u.handle)})` : 'Someone') +
+      ` scored **${score}** (${grade}) — ${temp}°F, ${dur}s.${perfect}`,
+    )
+    .setColor(0xffd700)
+    .addFields(fields)
+    .setFooter({ text: `SenseLink • /dotd • ${new Date(dab.createdAt ?? data.createdAt ?? Date.now()).toLocaleString()}` })
+    .setTimestamp();
+  if (u?.avatarUrl) embed.setThumbnail(u.avatarUrl);
+  return embed;
+}
+
+/**
+ * Format a live-feed dab post (used by /feedwatch when a new public
+ * dab arrives). Returns an EmbedBuilder ready to send to a channel.
+ */
+export function liveFeedDabEmbed(dab) {
+  if (!dab) return null;
+  const u = dab.user;
+  const temp = Math.round(dab.tempF ?? 0);
+  const dur = Math.round(dab.durationS ?? 0);
+  const perfect = dab.isPerfectDraw ? ' ⭐' : '';
+  const embed = new EmbedBuilder()
+    .setTitle(`🆕 ${u ? u.displayName : 'Someone'} just dabbed — ${dab.score} (${dab.grade})${perfect}`)
+    .setURL(dabUrl(dab.id))
+    .setDescription(
+      (u ? `[@${u.handle}](${profileUrl(u.handle)})` : 'Someone') +
+      ` scored **${dab.score}** (${dab.grade}) — ${temp}°F, ${dur}s.${perfect ? ' **Perfect draw!**' : ''}`,
+    )
+    .setColor(gradeColor(dab.grade))
+    .setFooter({ text: 'SenseLink • Live Feed' })
+    .setTimestamp(dab.createdAt ? new Date(dab.createdAt) : new Date());
+  if (u?.avatarUrl) embed.setThumbnail(u.avatarUrl);
+  return embed;
+}
+
+/**
+ * Format an achievement-unlock announcement embed.
+ * { handle, displayName, achievementTitle, achievementDescription, avatarUrl }
+ */
+export function achievementAnnouncementEmbed(info) {
+  const handle = info?.handle || 'unknown';
+  const name = info?.displayName || handle;
+  const title = info?.achievementTitle || 'An Achievement';
+  const desc = info?.achievementDescription || '';
+  const embed = new EmbedBuilder()
+    .setTitle(`🎖️ ${name} unlocked an achievement!`)
+    .setDescription(`**${title}**${desc ? `\n${desc}` : ''}`)
+    .setColor(0xffd700)
+    .setURL(profileUrl(handle))
+    .setFooter({ text: 'SenseLink • Achievement Alert' })
+    .setTimestamp();
+  if (info?.avatarUrl) embed.setThumbnail(info.avatarUrl);
+  return embed;
+}
+
+/**
+ * Format a rank-up (ELO tier boundary) announcement embed.
+ * { handle, displayName, oldTier, newTier, newRating, avatarUrl }
+ */
+export function rankUpAnnouncementEmbed(info) {
+  const handle = info?.handle || 'unknown';
+  const name = info?.displayName || handle;
+  const oldTier = info?.oldTier || '—';
+  const newTier = info?.newTier || '—';
+  const rating = info?.newRating != null ? Math.round(info.newRating) : '—';
+  const embed = new EmbedBuilder()
+    .setTitle(`📈 ${name} ranked up!`)
+    .setDescription(`**${oldTier} → ${newTier}**\nNew rating: **${rating}**`)
+    .setColor(0x22d3ee)
+    .setURL(profileUrl(handle))
+    .setFooter({ text: 'SenseLink • Rank-Up Alert' })
+    .setTimestamp();
+  if (info?.avatarUrl) embed.setThumbnail(info.avatarUrl);
+  return embed;
+}

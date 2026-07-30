@@ -238,3 +238,47 @@ export async function getFeed(limit = 10, cursor, period = 'recent') {
 export async function getFollowStats(handle) {
   return psFetch(`/api/users/${encodeURIComponent(handle)}/follow-stats`).catch(() => null);
 }
+
+/**
+ * Fetch the current presence snapshot from PeakSense.
+ * Returns { onlineCount, dabbingCount, dabbing, online, botSummary }
+ * where botSummary = { totalOnline, totalDabbing, dabbingNames: string[] }
+ */
+export async function getPresence() {
+  return psFetch('/api/presence').catch(() => null);
+}
+
+// ---------------------------------------------------------------------------
+// Deep integration endpoints (groups, community, dab of the day)
+// ---------------------------------------------------------------------------
+
+/**
+ * List public groups (battle rooms). Returns [{ id, name, memberCount,
+ * seshState, ... }] or null when unavailable.
+ */
+export async function getGroups() {
+  return psFetch('/api/groups').catch(() => null);
+}
+
+/**
+ * Get a single group's details by id.
+ */
+export async function getGroup(id) {
+  return psFetch(`/api/groups/${encodeURIComponent(id)}`).catch(() => null);
+}
+
+/**
+ * Weekly community stats. Returns { totalDabs, averageScore, topDabber,
+ * mostActive, ... } or null when the endpoint is not deployed yet.
+ */
+export async function getCommunityWeekly() {
+  return psFetch('/api/community/weekly').catch(() => null);
+}
+
+/**
+ * Dab of the Day. Returns { dab, user, score, tempF, createdAt, ... }
+ * or null when no dotd has been picked yet today.
+ */
+export async function getDabOfTheDay() {
+  return psFetch('/api/dabs/dotd').catch(() => null);
+}

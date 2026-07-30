@@ -4,6 +4,8 @@ import commands, { forwardChannelMessage } from './commands/index.js';
 import { handleComponent } from './components.js';
 import { normalizeHandle } from './client.js';
 import { searchHandles } from './handles.js';
+import { startAnnouncer, stopAnnouncer } from './announcer.js';
+import { stopAllFeedWatchers } from './feedwatch.js';
 
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 const PEAKSENSE_API_BASE = process.env.PEAKSENSE_API_BASE || 'http://127.0.0.1:8081';
@@ -46,6 +48,23 @@ client.once(Events.ClientReady, () => {
     type: ActivityType.Watching,
   });
   console.log(`PeakSense API base: ${PEAKSENSE_API_BASE}`);
+  // Start the achievement + rank-up announcer service. It polls the
+  // leaderboard and posts announcements to the configured channel.
+  // Channel can be set via SENSELINK_ANNOUNCE_CHANNEL_ID env or at
+  // runtime via /announce here.
+  startAnnouncer(client);
+});
+
+// Graceful shutdown — stop the announcer and all feed watchers.
+process.on('SIGTERM', () => {
+  stopAnnouncer();
+  stopAllFeedWatchers();
+  process.exit(0);
+});
+process.on('SIGINT', () => {
+  stopAnnouncer();
+  stopAllFeedWatchers();
+  process.exit(0);
 });
 
 

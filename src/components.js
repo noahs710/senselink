@@ -236,6 +236,11 @@ export function makeHelpEmbed() {
       { name: '/share', value: 'Get a profile or dab share URL', inline: true },
       { name: '/chat', value: '`/chat join` live site-chat feed · `/chat snapshot` export · `/chat reply`', inline: true },
       { name: '/room', value: '`/room join code:XXX` live room feed · `/room reply`', inline: true },
+      { name: '/feedwatch', value: '`/feedwatch start` live feed of new public dabs in this channel', inline: true },
+      { name: '/battles', value: 'List open public battle rooms', inline: true },
+      { name: '/digest', value: 'Weekly community stats digest', inline: true },
+      { name: '/dotd', value: '🏆 Dab of the Day', inline: true },
+      { name: '/announce', value: '`/announce here` configure achievement & rank-up alerts', inline: true },
       { name: '/senselink', value: 'Invite link + this help panel', inline: true },
     )
     .setFooter({ text: 'SenseLink for PeakSense' });

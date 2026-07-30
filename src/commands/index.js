@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+﻿import { randomUUID } from 'node:crypto';
 import { SlashCommandBuilder, EmbedBuilder, AttachmentBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import {
   getDab,
@@ -16,6 +16,11 @@ import {
   getSiteChat,
   resolveProfile,
   getFollowStats,
+  getPresence,
+  getGroups,
+  getGroup,
+  getCommunityWeekly,
+  getDabOfTheDay,
 } from '../client.js';
 import {
   dabEmbed,
@@ -25,6 +30,9 @@ import {
   chatEmbed,
   CHAT_PAGE_SIZE,
   statsEmbed,
+  battlesEmbed,
+  digestEmbed,
+  dotdEmbed,
 } from '../formatters.js';
 import {
   makeDabRow,
@@ -34,6 +42,8 @@ import {
 import { startPaginator } from '../paginator.js';
 import { getSiteSocket, getRoomSocket } from '../peakSocket.js';
 import { buildScoreTrend, buildDabTraceGraph } from '../chart.js';
+import { startFeedWatch, stopFeedWatch, isFeedWatching } from '../feedwatch.js';
+import { getAnnouncer } from '../announcer.js';
 
 const commands = [
   {
@@ -181,17 +191,17 @@ const commands = [
       const a = s1?.stats ?? {};
       const b = s2?.stats ?? {};
       const embed = new EmbedBuilder()
-        .setTitle(`⚔️ ${u1.user.displayName} vs ${u2.user.displayName}`)
+        .setTitle(`âš”ï¸ ${u1.user.displayName} vs ${u2.user.displayName}`)
         .setDescription(
           `| | @${h1} | @${h2} |\n|---|---|---|\n` +
-          `| Rating | ${a.rating ?? '—'} | ${b.rating ?? '—'} |\n` +
-          `| Best | ${a.bestScore ?? '—'} | ${b.bestScore ?? '—'} |\n` +
+          `| Rating | ${a.rating ?? 'â€”'} | ${b.rating ?? 'â€”'} |\n` +
+          `| Best | ${a.bestScore ?? 'â€”'} | ${b.bestScore ?? 'â€”'} |\n` +
           `| Dabs | ${a.totalDabs ?? 0} | ${b.totalDabs ?? 0} |\n` +
           `| Public | ${a.publicDabs ?? 0} | ${b.publicDabs ?? 0} |\n` +
-          `| Avg | ${a.averageScore ?? '—'} | ${b.averageScore ?? '—'} |`,
+          `| Avg | ${a.averageScore ?? 'â€”'} | ${b.averageScore ?? 'â€”'} |`,
         )
         .setColor(0x22c55e)
-        .setFooter({ text: 'PeakSense • /compare' });
+        .setFooter({ text: 'PeakSense â€¢ /compare' });
       return interaction.editReply({ embeds: [embed] });
     },
   },
@@ -258,7 +268,7 @@ const commands = [
         .setTitle('SenseLink status')
         .setColor(health ? 0x22c55e : 0xef4444)
         .addFields(
-          { name: 'API reachable', value: health ? '✅ Yes' : '❌ No', inline: true },
+          { name: 'API reachable', value: health ? 'âœ… Yes' : 'âŒ No', inline: true },
           { name: 'Latency', value: `${ms}ms`, inline: true },
           { name: 'PeakSense base', value: process.env.PEAKSENSE_API_BASE || 'http://127.0.0.1:8081', inline: true },
         )
@@ -275,6 +285,34 @@ const commands = [
       const help = makeHelpEmbed();
       help.setDescription(help.data.description + `\n\n[Add SenseLink to your server](${invite})`);
       return interaction.reply({ embeds: [help] });
+    },
+  },
+  {
+    data: new SlashCommandBuilder()
+      .setName('presence')
+      .setDescription('See who is currently dabbing on PeakSense'),
+    async execute(interaction) {
+      await interaction.deferReply();
+      const presence = await getPresence();
+      if (!presence) {
+        return interaction.editReply({ content: 'Could not reach PeakSense presence API.' });
+      }
+      const summary = presence.botSummary || {};
+      const dabbing = summary.dabbingNames || [];
+      const embed = new EmbedBuilder()
+        .setTitle('PeakSense Presence')
+        .setColor(0x22d3ee)
+        .addFields(
+          { name: 'Online', value: String(summary.totalOnline ?? presence.onlineCount ?? 0), inline: true },
+          { name: 'Dabbing Now', value: String(summary.totalDabbing ?? presence.dabbingCount ?? 0), inline: true },
+        )
+        .setFooter({ text: 'SenseLink for PeakSense' });
+      if (dabbing.length > 0) {
+        embed.setDescription(dabbing.slice(0, 20).map((n) => `â€¢ ${n}`).join('\n') + (dabbing.length > 20 ? `\n*â€¦and ${dabbing.length - 20} more*` : ''));
+      } else {
+        embed.setDescription('No one is dabbing right now.');
+      }
+      return interaction.editReply({ embeds: [embed] });
     },
   },
 ];
@@ -500,7 +538,7 @@ function _siteFeedRows(messageId, pageIndex = 0, totalPages = 1) {
       new ActionRowBuilder().addComponents(
         new ButtonBuilder()
           .setCustomId(`chatpg:${messageId}:older`)
-          .setLabel("◀ Older")
+          .setLabel("â—€ Older")
           .setStyle(ButtonStyle.Secondary)
           .setDisabled(pageIndex <= 0),
         new ButtonBuilder()
@@ -510,7 +548,7 @@ function _siteFeedRows(messageId, pageIndex = 0, totalPages = 1) {
           .setDisabled(true),
         new ButtonBuilder()
           .setCustomId(`chatpg:${messageId}:newer`)
-          .setLabel("Newer ▶")
+          .setLabel("Newer â–¶")
           .setStyle(ButtonStyle.Primary)
           .setDisabled(pageIndex >= totalPages - 1),
       ),
@@ -538,7 +576,7 @@ function _roomFeedRows(messageId, code, pageIndex = 0, totalPages = 1) {
       new ActionRowBuilder().addComponents(
         new ButtonBuilder()
           .setCustomId(`chatpg:${messageId}:older`)
-          .setLabel("◀ Older")
+          .setLabel("â—€ Older")
           .setStyle(ButtonStyle.Secondary)
           .setDisabled(pageIndex <= 0),
         new ButtonBuilder()
@@ -548,7 +586,7 @@ function _roomFeedRows(messageId, code, pageIndex = 0, totalPages = 1) {
           .setDisabled(true),
         new ButtonBuilder()
           .setCustomId(`chatpg:${messageId}:newer`)
-          .setLabel("Newer ▶")
+          .setLabel("Newer â–¶")
           .setStyle(ButtonStyle.Primary)
           .setDisabled(pageIndex >= totalPages - 1),
       ),
@@ -575,7 +613,7 @@ function _wireSiteSocketFanout() {
   const sock = getSiteSocket();
   sock.on((t, d) => {
     if (t === 'open') {
-      // Socket (re)connected — backfill any messages missed while
+      // Socket (re)connected â€” backfill any messages missed while
       // disconnected.  We fire for every active site session.
       for (const sess of _siteSessions.values()) {
         if (sess?.entry) _resyncSiteFeed(sess.entry);
@@ -819,7 +857,7 @@ async function _doRefresh(interaction, entry, kind, code) {
     profiles,
     author,
     presence: kind === 'room' ? (entry.presence || null) : null,
-    footerText: entry.closed ? 'Live feed stopped · /chat join to resume' : null,
+    footerText: entry.closed ? 'Live feed stopped Â· /chat join to resume' : null,
     typing: entry.typing || null,
   });
   // Use message.edit() instead of interaction.editReply() for ongoing
@@ -843,7 +881,7 @@ async function _doRefresh(interaction, entry, kind, code) {
 
 
 
-// /stats — detailed progression breakdown for a user.
+// /stats â€” detailed progression breakdown for a user.
 const _statsCmd = {
   data: new SlashCommandBuilder()
     .setName('stats')
@@ -873,7 +911,7 @@ const _statsCmd = {
 commands.push(_statsCmd);
 
 
-// /top — shorthand leaderboard with a small count.
+// /top â€” shorthand leaderboard with a small count.
 const _topCmd = {
   data: new SlashCommandBuilder()
     .setName('top')
@@ -1212,7 +1250,7 @@ const _roomCmd = {
       kind: 'room',
       code,
       messages: [],
-      title: `🎮 Room ${code}`,
+      title: `ðŸŽ® Room ${code}`,
     });
     const rows = _roomFeedRows('0', code, 0, 1);
     const reply = await interaction.editReply({ embeds: [embed], components: rows, fetchReply: true });
@@ -1235,4 +1273,183 @@ const _roomCmd = {
   },
 };
 commands.push(_roomCmd);
+
+// ---------------------------------------------------------------------------
+// Deep integration commands: /feedwatch, /battles, /digest, /dotd, /announce
+// ---------------------------------------------------------------------------
+
+// /feedwatch â€” live feed that posts new public dabs to the channel as
+// they arrive. Uses polling by default, switches to WS if NEW_DAB
+// frames are available.
+const _feedWatchCmd = {
+  data: new SlashCommandBuilder()
+    .setName('feedwatch')
+    .setDescription('Live feed â€” posts new public dabs to this channel as they happen')
+    .addSubcommand((sc) =>
+      sc
+        .setName('start')
+        .setDescription('Start posting new public dabs to this channel in real time'),
+    )
+    .addSubcommand((sc) =>
+      sc
+        .setName('stop')
+        .setDescription('Stop the live feed in this channel'),
+    )
+    .addSubcommand((sc) =>
+      sc
+        .setName('status')
+        .setDescription('Check if the live feed is active in this channel'),
+    ),
+  async execute(interaction, client) {
+    const sub = interaction.options.getSubcommand();
+    const channelId = interaction.channelId;
+
+    if (sub === 'status') {
+      const active = isFeedWatching(channelId);
+      return interaction.reply({
+        content: active
+          ? 'ðŸŸ¢ Live feed is **active** in this channel. New public dabs will be posted here.'
+          : 'ðŸ”´ Live feed is **not active** in this channel. Use `/feedwatch start` to begin.',
+        ephemeral: true,
+      });
+    }
+
+    if (sub === 'stop') {
+      const stopped = stopFeedWatch(channelId);
+      return interaction.reply({
+        content: stopped
+          ? 'Stopped the live feed in this channel.'
+          : 'No live feed was active in this channel.',
+        ephemeral: true,
+      });
+    }
+
+    // sub === 'start'
+    if (isFeedWatching(channelId)) {
+      return interaction.reply({
+        content: 'Live feed is already active in this channel. Use `/feedwatch stop` to stop it.',
+        ephemeral: true,
+      });
+    }
+    startFeedWatch(client, channelId);
+    return interaction.reply({
+      content: 'ðŸŸ¢ Live feed started! New public dabs will be posted to this channel as they arrive. Use `/feedwatch stop` to stop.',
+    });
+  },
+};
+commands.push(_feedWatchCmd);
+
+// /battles â€” list open public battle rooms from GET /api/groups
+const _battlesCmd = {
+  data: new SlashCommandBuilder()
+    .setName('battles')
+    .setDescription('List open public battle rooms on PeakSense'),
+  async execute(interaction) {
+    await interaction.deferReply();
+    const res = await getGroups();
+    const groups = res?.groups ?? res ?? [];
+    const embed = battlesEmbed(groups);
+    return interaction.editReply({ embeds: [embed] });
+  },
+};
+commands.push(_battlesCmd);
+
+// /digest â€” weekly community stats digest
+const _digestCmd = {
+  data: new SlashCommandBuilder()
+    .setName('digest')
+    .setDescription('Weekly community stats digest â€” total dabs, avg score, top dabber, most active'),
+  async execute(interaction) {
+    await interaction.deferReply();
+    const stats = await getCommunityWeekly();
+    const embed = digestEmbed(stats);
+    return interaction.editReply({ embeds: [embed] });
+  },
+};
+commands.push(_digestCmd);
+
+// /dotd â€” Dab of the Day
+const _dotdCmd = {
+  data: new SlashCommandBuilder()
+    .setName('dotd')
+    .setDescription('ðŸ† Dab of the Day â€” the highest-rated dab today'),
+  async execute(interaction) {
+    await interaction.deferReply();
+    const data = await getDabOfTheDay();
+    const embed = dotdEmbed(data);
+    const dab = data?.dab || data;
+    const id = dab?.id;
+    const handle = dab?.user?.handle ?? '';
+    const files = [];
+    if (id) {
+      // Include the share button row like /dab does.
+      const { makeDabRow } = await import('../components.js');
+      const row = makeDabRow(dabUrl(id), handle, id);
+      return interaction.editReply({ embeds: [embed], components: [row], files });
+    }
+    return interaction.editReply({ embeds: [embed], files });
+  },
+};
+commands.push(_dotdCmd);
+
+// /announce â€” configure achievement and rank-up announcement channel
+const _announceCmd = {
+  data: new SlashCommandBuilder()
+    .setName('announce')
+    .setDescription('Configure achievement and rank-up announcements for this server')
+    .addSubcommand((sc) =>
+      sc
+        .setName('here')
+        .setDescription('Set this channel as the announcement channel for achievements and rank-ups'),
+    )
+    .addSubcommand((sc) =>
+      sc
+        .setName('status')
+        .setDescription('Check the current announcement configuration'),
+    )
+    .addSubcommand((sc) =>
+      sc
+        .setName('stop')
+        .setDescription('Stop sending announcements to this channel'),
+    ),
+  async execute(interaction, _client) {
+    const sub = interaction.options.getSubcommand();
+    const announcer = getAnnouncer();
+
+    if (sub === 'status') {
+      if (!announcer) {
+        return interaction.reply({ content: 'Announcer service is not running.', ephemeral: true });
+      }
+      const channelId = announcer.channelId;
+      return interaction.reply({
+        content: channelId
+          ? `ðŸ“¢ Announcements are being sent to <#${channelId}>.\nPolling top ${announcer._maxUsers} users every ${announcer._pollMs / 1000}s for new achievements and rank-ups.`
+          : 'No announcement channel is configured. Use `/announce here` to set one.',
+        ephemeral: true,
+      });
+    }
+
+    if (sub === 'stop') {
+      if (!announcer) {
+        return interaction.reply({ content: 'Announcer service is not running.', ephemeral: true });
+      }
+      const current = announcer.channelId;
+      if (current === interaction.channelId) {
+        announcer.setChannel(null);
+        return interaction.reply({ content: 'Stopped sending announcements to this channel.', ephemeral: true });
+      }
+      return interaction.reply({ content: 'This channel was not the configured announcement channel.', ephemeral: true });
+    }
+
+    // sub === 'here'
+    if (!announcer) {
+      return interaction.reply({ content: 'Announcer service is not running. Ensure the bot is properly configured.', ephemeral: true });
+    }
+    announcer.setChannel(interaction.channelId);
+    return interaction.reply({
+      content: `ðŸ“¢ This channel is now the announcement channel!\nAchievement unlocks and rank-ups for the top ${announcer._maxUsers} users will be posted here.`,
+    });
+  },
+};
+commands.push(_announceCmd);
 

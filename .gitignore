@@ -1,4 +1,4 @@
-# Dependencies
+﻿# Dependencies
 node_modules
 
 # Environment files (.env.example is tracked)
@@ -22,3 +22,4 @@ Thumbs.db
 # Coverage
 coverage
 .nyc_output
+.empryo
