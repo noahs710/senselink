@@ -11,8 +11,8 @@ import {
   liveFeedDabEmbed,
   achievementAnnouncementEmbed,
   rankUpAnnouncementEmbed,
-} from './formatters.js';
-import { tierForRating } from './announcer.js';
+} from '../../src/formatters.js';
+import { tierForRating } from '../../src/announcer.js';
 
 // Helper: extract the title (setDescription text) from an EmbedBuilder.
 function embedTitle(embed) {

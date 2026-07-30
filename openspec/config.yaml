@@ -1,0 +1,8 @@
+﻿schema: spec-driven
+
+context: |
+  Tech stack: Node.js (ESM), discord.js v14, PeakSense REST + WebSocket.
+  Companion Discord bot at C:\\Users\\Gabrielle Monlea\\Documents\\Projects\\peaksense; upstream lives at the same path.
+  Tests live under tests/integration/*.test.mjs using node:test. The src/ tree holds no test files.
+  Feedwatch uses one global room socket joined to FEEDWATCH_WATCH_ROOM (env: SENSELINK_FEEDWATCH_ROOM, default BOTS). FINAL frames from that room drive real-time delivery; polling backs up coverage for non-room dabs.
+  Achievement announcer reads SENSELINK_ANNOUNCE_* config variables; constructor options take precedence over process config.

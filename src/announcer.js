@@ -1,20 +1,20 @@
 /**
- * SenseLink Announcer — background poller that watches for two kinds
+ * SenseLink Announcer â€” background poller that watches for two kinds
  * of events and posts announcements to configurable Discord channels:
  *
- *  1. Achievement unlocks  — polls the leaderboard's top users
+ *  1. Achievement unlocks  â€” polls the leaderboard's top users
  *     periodically, fetches their achievements, and announces any new
  *     ones since the last check.
- *  2. Rank-up (ELO tier crossing) — polls the leaderboard, tracks each
+ *  2. Rank-up (ELO tier crossing) â€” polls the leaderboard, tracks each
  *     user's rating, and when a user crosses a tier boundary (e.g.
- *     Bronze → Silver), posts a rank-up announcement.
+ *     Bronze â†’ Silver), posts a rank-up announcement.
  *
  * Configuration:
- *  - SENSelink_ANNOUNCE_CHANNEL_ID  — Discord channel id for announcements
- *    (set via env or passed to startAnnouncer)
- *  - SENSelink_ANNOUNCE_POLL_MS     — poll interval, default 60s
- *  - SENSelink_ANNOUNCE_MAX_USERS   — how many top users to track, default 25
- *  - SENSelink_ANNOUNCE_DISABLED    — "1" to disable entirely
+ *  - SENSelink_ANNOUNCE_CHANNEL_ID  â€” initial Discord channel id (overridable at runtime via /announce here)
+ *    (env var is read at startup; runtime overrides via /announce here take precedence after start)
+ *  - SENSelink_ANNOUNCE_POLL_MS     â€” poll interval, default 60s
+ *  - SENSelink_ANNOUNCE_MAX_USERS   â€” how many top users to track, default 25
+ *  - SENSelink_ANNOUNCE_DISABLED    â€” "1" to disable entirely
  *
  * The announcer is designed to be resilient: API failures are swallowed,
  * the poll interval has jitter, and the timer is unref()'d so it doesn't
@@ -103,7 +103,7 @@ export class Announcer {
     // First poll after a short delay to let the bot connect.
     this._timer = setTimeout(() => this._poll(), 5_000);
     this._timer.unref?.();
-    console.log(`[announcer] started — polling every ${this._pollMs}ms, tracking up to ${this._maxUsers} users`);
+    console.log(`[announcer] started â€” polling every ${this._pollMs}ms, tracking up to ${this._maxUsers} users`);
   }
 
   stop() {
@@ -120,7 +120,7 @@ export class Announcer {
     } catch (err) {
       console.error('[announcer] poll error:', err?.message || err);
     }
-    // Schedule next poll with small jitter (±10%) to avoid thundering herd.
+    // Schedule next poll with small jitter (Â±10%) to avoid thundering herd.
     const jitter = Math.round(this._pollMs * (0.9 + Math.random() * 0.2));
     this._timer = setTimeout(() => this._poll(), jitter);
     this._timer.unref?.();
@@ -149,7 +149,7 @@ export class Announcer {
       const newTier = tierForRating(rating);
       const oldTier = this._lastTier.get(handle);
       if (oldTier && oldTier !== newTier) {
-        // Tier changed — announce it.
+        // Tier changed â€” announce it.
         await this._postRankUp({
           handle, displayName, avatarUrl,
           oldTier, newTier, newRating: rating,
